@@ -26,6 +26,18 @@ public class Cclp1Tests
     }
 
     [Fact]
+    public void Levels_With_Hint_Tiles_Have_Hint_Text()
+    {
+        var levels = DatParser.Parse(LoadCclp1());
+        var withHintTile = levels.Where(l =>
+            l.TopLayer.Contains((byte)0x2F) || l.BottomLayer.Contains((byte)0x2F)).ToList();
+        Assert.NotEmpty(withHintTile);
+        Assert.All(withHintTile, l =>
+            Assert.False(string.IsNullOrWhiteSpace(l.Hint),
+                $"level {l.Number} ({l.Title}) has a hint tile but no hint text"));
+    }
+
+    [Fact]
     public void Every_Level_Loads_Into_A_GameState_With_A_Chip_Start()
     {
         var levels = DatParser.Parse(LoadCclp1());

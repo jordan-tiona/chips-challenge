@@ -108,7 +108,13 @@ public partial class Main : Node2D
         row.AddChild(next);
 
         // ---- bottom hint panel ----
-        _hintPanel = new PanelContainer { Visible = false };
+        _hintPanel = new PanelContainer
+        {
+            Visible = false,
+            // Anchored to the bottom edge; must grow upward or the content
+            // renders below the visible screen.
+            GrowVertical = Control.GrowDirection.Begin,
+        };
         _hintPanel.SetAnchorsPreset(Control.LayoutPreset.BottomWide);
         _hintLabel = new Label
         {
