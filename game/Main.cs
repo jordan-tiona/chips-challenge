@@ -116,6 +116,11 @@ public partial class Main : Node2D
             GrowVertical = Control.GrowDirection.Begin,
         };
         _hintPanel.SetAnchorsPreset(Control.LayoutPreset.BottomWide);
+        // Float above the bottom edge: immersive mode draws under rounded
+        // screen corners and the gesture bar, which clip flush content.
+        _hintPanel.OffsetLeft = 24;
+        _hintPanel.OffsetRight = -24;
+        _hintPanel.OffsetBottom = -56;
         _hintLabel = new Label
         {
             HorizontalAlignment = HorizontalAlignment.Center,
