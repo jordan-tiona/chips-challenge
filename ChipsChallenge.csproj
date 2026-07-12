@@ -1,0 +1,14 @@
+<Project Sdk="Godot.NET.Sdk/4.7.0">
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <RootNamespace>ChipsChallenge</RootNamespace>
+    <EnableDynamicLoading>true</EnableDynamicLoading>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- core/ is a standalone .NET solution area; its sources compile via ProjectReference, not this glob -->
+    <Compile Remove="core/**/*.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="core\ChipsCore\ChipsCore.csproj" />
+  </ItemGroup>
+</Project>

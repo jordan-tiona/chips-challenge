@@ -1,0 +1,15 @@
+# Godot
+.godot/
+*.translation
+
+# .NET
+bin/
+obj/
+*.user
+.vs/
+
+# Export secrets (keystores etc.) — keep presets out until sanitized
+export_presets.cfg
+
+# Build outputs
+builds/
