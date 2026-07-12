@@ -133,8 +133,12 @@ Plan is to prototype all three and pick by feel:
    monsters exist (M3), add safety halts when hazards approach the path.
 
 Also: pinch-zoom / camera follow, since a 32×32 grid at phone size is too
-small to render all at once. Original showed a 9×9 viewport — we'll do a
-follow-camera at roughly that zoom, adjustable.
+small to render all at once. Original showed a 9×9 viewport — we do a
+follow-camera at roughly that zoom. Implemented: two-finger drag pans,
+pinch zooms (0.7x shows the whole map); any move re-attaches the camera
+to Chip. Decision: free scouting is allowed — the fixed 9×9 window was a
+Lynx-era constraint, and hiding the board contradicts deliberate-decision
+play. A purist "classic view" lock can be an option later.
 
 ## 9. Testing strategy
 

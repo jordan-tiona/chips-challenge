@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Linq;
 using ChipsCore;
 using Godot;
 using FileAccess = Godot.FileAccess;
@@ -24,11 +25,19 @@ public partial class Main : Node2D
     private PanelContainer _banner = null!;
     private Label _bannerLabel = null!;
 
+    private const float MinZoom = 0.7f;   // whole 32x32 map fits on screen
+    private const float MaxZoom = 3f;
+
     private Direction _lastHeld = Direction.None;
     private double _cooldown;
     private Vector2? _touchAnchor;
     private Direction _touchDir = Direction.None;
     private Queue<Direction>? _autoPath;  // tap-to-move plan being executed
+
+    private readonly Dictionary<int, Vector2> _touches = new();
+    private bool _pinching;   // two-finger camera gesture in progress
+    private bool _freeCam;    // camera detached from Chip until next move
+    private float _zoom = 2f;
 
     public override void _Ready()
     {
@@ -132,6 +141,10 @@ public partial class Main : Node2D
         _banner.Visible = false;
         _inputLocked = false;
         _autoPath = null;
+        _touches.Clear();
+        _pinching = false;
+        _freeCam = false;
+        _camera.PositionSmoothingEnabled = true;
         _camera.Position = _board.ChipPixelCenter;
         _camera.ResetSmoothing();
         RefreshHud();
@@ -149,7 +162,8 @@ public partial class Main : Node2D
 
     public override void _Process(double delta)
     {
-        _camera.Position = _board.ChipPixelCenter;
+        if (!_freeCam)
+            _camera.Position = _board.ChipPixelCenter;
 
         if (_inputLocked) return;
 
@@ -209,27 +223,90 @@ public partial class Main : Node2D
         switch (@event)
         {
             case InputEventScreenTouch touch when touch.Pressed:
-                _touchAnchor = touch.Position;
-                _touchDir = Direction.None;
+                _touches[touch.Index] = touch.Position;
+                if (_touches.Count == 1)
+                {
+                    _touchAnchor = touch.Position;
+                    _touchDir = Direction.None;
+                }
+                else
+                {
+                    // Second finger down: this is a camera gesture, not movement.
+                    _touchAnchor = null;
+                    _touchDir = Direction.None;
+                    _pinching = true;
+                    _camera.PositionSmoothingEnabled = false; // 1:1 pan feel
+                }
                 break;
+
             case InputEventScreenTouch touch:
-                // A release that never became a swipe is a tap.
-                if (_touchAnchor is { } start && _touchDir == Direction.None
+                // A single-finger release that never became a swipe is a tap.
+                if (!_pinching && _touchAnchor is { } start && _touchDir == Direction.None
                     && (touch.Position - start).Length() <= TapSlop)
                     HandleTap(touch.Position);
+                _touches.Remove(touch.Index);
+                if (_touches.Count == 0) _pinching = false;
                 _touchAnchor = null;
                 _touchDir = Direction.None;
                 break;
-            case InputEventScreenDrag drag when _touchAnchor is { } anchor:
-                var delta = drag.Position - anchor;
-                if (delta.Length() >= SwipeThreshold)
-                    _touchDir = Mathf.Abs(delta.X) >= Mathf.Abs(delta.Y)
-                        ? (delta.X > 0 ? Direction.Right : Direction.Left)
-                        : (delta.Y > 0 ? Direction.Down : Direction.Up);
-                else
-                    _touchDir = Direction.None;
+
+            case InputEventScreenDrag drag:
+                if (_pinching && _touches.Count >= 2)
+                    UpdatePinch(drag);
+                else if (_touchAnchor is { } anchor)
+                {
+                    var delta = drag.Position - anchor;
+                    if (delta.Length() >= SwipeThreshold)
+                        _touchDir = Mathf.Abs(delta.X) >= Mathf.Abs(delta.Y)
+                            ? (delta.X > 0 ? Direction.Right : Direction.Left)
+                            : (delta.Y > 0 ? Direction.Down : Direction.Up);
+                    else
+                        _touchDir = Direction.None;
+                }
+                if (_touches.ContainsKey(drag.Index))
+                    _touches[drag.Index] = drag.Position;
+                break;
+
+            case InputEventMouseButton { Pressed: true } wheel:
+                // Desktop convenience; phones use pinch.
+                if (wheel.ButtonIndex == MouseButton.WheelUp) SetZoom(_zoom * 1.1f);
+                else if (wheel.ButtonIndex == MouseButton.WheelDown) SetZoom(_zoom / 1.1f);
                 break;
         }
+    }
+
+    /// <summary>Two-finger pan/pinch. Uses the pre-update finger positions
+    /// in _touches against the new position from the drag event.</summary>
+    private void UpdatePinch(InputEventScreenDrag drag)
+    {
+        var ids = _touches.Keys.Order().Take(2).ToArray();
+        if (!ids.Contains(drag.Index)) return;
+
+        var a0 = _touches[ids[0]];
+        var b0 = _touches[ids[1]];
+        var a1 = drag.Index == ids[0] ? drag.Position : a0;
+        var b1 = drag.Index == ids[1] ? drag.Position : b0;
+
+        var oldDist = (a0 - b0).Length();
+        var newDist = (a1 - b1).Length();
+        if (oldDist > 1f) SetZoom(_zoom * newDist / oldDist);
+
+        _freeCam = true;
+        _camera.Position -= ((a1 + b1) / 2 - (a0 + b0) / 2) / _zoom;
+    }
+
+    private void SetZoom(float zoom)
+    {
+        _zoom = Mathf.Clamp(zoom, MinZoom, MaxZoom);
+        _camera.Zoom = new Vector2(_zoom, _zoom);
+    }
+
+    /// <summary>Any actual move re-attaches the camera to Chip.</summary>
+    private void ResumeFollow()
+    {
+        if (!_freeCam) return;
+        _freeCam = false;
+        _camera.PositionSmoothingEnabled = true; // glide back, don't snap
     }
 
     private void HandleTap(Vector2 screenPos)
@@ -251,6 +328,7 @@ public partial class Main : Node2D
 
     private MoveResult DoMove(Direction dir)
     {
+        ResumeFollow();
         var result = _board.TryMove(dir);
         RefreshHud();
         if (result != MoveResult.Won) return result;
