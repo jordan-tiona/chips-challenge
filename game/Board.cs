@@ -6,7 +6,7 @@ namespace ChipsChallenge;
 /// <summary>
 /// Draws the 32x32 grid from the engine's GameState with placeholder
 /// colors and glyphs (proper tileset art is M5). Never mutates state
-/// except by forwarding TryMove.
+/// except by forwarding TryMove/SlideStep.
 /// </summary>
 public partial class Board : Node2D
 {
@@ -30,6 +30,14 @@ public partial class Board : Node2D
         return result;
     }
 
+    public MoveResult SlideStep()
+    {
+        if (State == null) return MoveResult.Blocked;
+        var result = State.SlideStep();
+        QueueRedraw();
+        return result;
+    }
+
     public Vector2 ChipPixelCenter => State == null
         ? Vector2.Zero
         : new Vector2(
@@ -45,11 +53,23 @@ public partial class Board : Node2D
             for (var x = 0; x < GameState.Width; x++)
             {
                 var tile = State.GetTile(x, y);
-                DrawRect(new Rect2(x * TileSize, y * TileSize, TileSize, TileSize), Background(tile));
+                var origin = new Vector2(x * TileSize, y * TileSize);
+                DrawRect(new Rect2(origin, TileSize, TileSize), Background(tile));
+
                 var glyph = Glyph(tile);
                 if (glyph.Length > 0)
-                    DrawString(_font, new Vector2(x * TileSize, y * TileSize + 23), glyph,
+                    DrawString(_font, origin + new Vector2(0, 23), glyph,
                         HorizontalAlignment.Center, TileSize, 18, GlyphColor(tile));
+
+                DrawEdgeWalls(origin, tile);
+
+                if (State.HasBlockAt(x, y))
+                {
+                    DrawRect(new Rect2(origin + new Vector2(3, 3), TileSize - 6, TileSize - 6),
+                        new Color("8a6a42"));
+                    DrawRect(new Rect2(origin + new Vector2(3, 3), TileSize - 6, TileSize - 6),
+                        new Color("5a4225"), filled: false, width: 2);
+                }
             }
         }
 
@@ -61,15 +81,42 @@ public partial class Board : Node2D
         DrawArc(ChipPixelCenter, 12, 0, Mathf.Tau, 24, new Color("1a1a2e"), 2, antialiased: true);
     }
 
+    /// <summary>Thin walls and ice-corner walls drawn as bright edge lines.</summary>
+    private void DrawEdgeWalls(Vector2 o, Tile tile)
+    {
+        var c = new Color(0.9f, 0.9f, 0.95f);
+        const float w = 3f;
+        var (n, s, e, west) = tile switch
+        {
+            Tile.ThinN => (true, false, false, false),
+            Tile.ThinS => (false, true, false, false),
+            Tile.ThinE => (false, false, true, false),
+            Tile.ThinW => (false, false, false, true),
+            Tile.ThinSE => (false, true, true, false),
+            Tile.IceNW => (true, false, false, true),
+            Tile.IceNE => (true, false, true, false),
+            Tile.IceSW => (false, true, false, true),
+            Tile.IceSE => (false, true, true, false),
+            _ => (false, false, false, false),
+        };
+        if (n) DrawLine(o, o + new Vector2(TileSize, 0), c, w);
+        if (s) DrawLine(o + new Vector2(0, TileSize), o + new Vector2(TileSize, TileSize), c, w);
+        if (e) DrawLine(o + new Vector2(TileSize, 0), o + new Vector2(TileSize, TileSize), c, w);
+        if (west) DrawLine(o, o + new Vector2(0, TileSize), c, w);
+    }
+
     private static Color Background(Tile tile) => tile switch
     {
-        Tile.Wall or Tile.FakeWall => new Color("565664"),
+        Tile.Wall => new Color("565664"),
+        Tile.FakeWall => new Color("565664"),       // disguised as a wall
         Tile.Water => new Color("2a5db0"),
         Tile.Fire => new Color("c74a33"),
         Tile.Dirt => new Color("6b4a2f"),
         Tile.Gravel => new Color("55504a"),
-        Tile.Ice => new Color("a9d5e2"),
-        Tile.ForceFloor => new Color("463a6e"),
+        Tile.Ice or Tile.IceNW or Tile.IceNE or Tile.IceSW or Tile.IceSE
+            => new Color("a9d5e2"),
+        Tile.ForceN or Tile.ForceS or Tile.ForceE or Tile.ForceW or Tile.ForceRandom
+            => new Color("463a6e"),
         Tile.Exit => new Color("2e8b57"),
         Tile.Socket => new Color("3a3a46"),
         Tile.DoorRed => new Color("a03030"),
@@ -78,13 +125,14 @@ public partial class Board : Node2D
         Tile.DoorGreen => new Color("30a058"),
         Tile.Hint => new Color("2f4f6f"),
         Tile.Thief => new Color("4e3a5e"),
-        Tile.Block => new Color("7a5a38"),
         Tile.Teleport => new Color("6e2a80"),
         Tile.Trap => new Color("46424e"),
-        Tile.ToggleWall => new Color("6a4848"),
+        Tile.ToggleClosed => new Color("6a4848"),
+        Tile.ToggleOpen => new Color("2a2028"),
         Tile.CloneMachine => new Color("6e6e3a"),
         Tile.PopupWall => new Color("42424e"),
-        _ => new Color("1c1c24"), // floor and item-bearing floor
+        // InvisibleWall and AppearingWall deliberately draw as floor.
+        _ => new Color("1c1c24"),
     };
 
     private static string Glyph(Tile tile) => tile switch
@@ -97,11 +145,17 @@ public partial class Board : Node2D
         Tile.DoorRed or Tile.DoorBlue or Tile.DoorYellow or Tile.DoorGreen => "D",
         Tile.KeyRed or Tile.KeyBlue or Tile.KeyYellow or Tile.KeyGreen => "K",
         Tile.BootsWater or Tile.BootsFire or Tile.BootsIce or Tile.BootsForce => "B",
-        Tile.ForceFloor => "~",
+        Tile.ForceN => "^",
+        Tile.ForceS => "v",
+        Tile.ForceE => ">",
+        Tile.ForceW => "<",
+        Tile.ForceRandom => "%",
         Tile.Teleport => "@",
         Tile.Bomb => "*",
-        Tile.Button => "o",
-        Tile.ToggleWall => "=",
+        Tile.ButtonGreen or Tile.ButtonRed or Tile.ButtonBrown or Tile.ButtonBlue => "o",
+        Tile.ToggleClosed => "=",
+        Tile.ToggleOpen => "-",
+        Tile.Trap => "u",
         Tile.CloneMachine => "M",
         _ => "",
     };
@@ -114,8 +168,14 @@ public partial class Board : Node2D
         Tile.KeyYellow => new Color("e0d050"),
         Tile.KeyGreen => new Color("50e080"),
         Tile.Bomb => new Color("ff6050"),
-        Tile.BootsWater or Tile.BootsFire or Tile.BootsIce or Tile.BootsForce
-            => new Color("c0c0d0"),
+        Tile.ButtonGreen => new Color("50e080"),
+        Tile.ButtonRed => new Color("e05050"),
+        Tile.ButtonBrown => new Color("b08050"),
+        Tile.ButtonBlue => new Color("5080e0"),
+        Tile.BootsWater => new Color("60a0ff"),
+        Tile.BootsFire => new Color("ff8050"),
+        Tile.BootsIce => new Color("b0e0f0"),
+        Tile.BootsForce => new Color("b090e0"),
         _ => new Color(1, 1, 1, 0.85f),
     };
 }

@@ -9,17 +9,24 @@ namespace ChipsChallenge;
 public partial class Main : Node2D
 {
     private const double RepeatDelay = 0.16;   // seconds between steps while held
+    private const double SlideDelay = 0.08;    // sliding is 2x walking speed (MS)
     private const float SwipeThreshold = 48f;  // px of drag that counts as a swipe
     private const float TapSlop = 24f;         // max px of finger travel for a tap
 
     private List<LevelData> _levels = new();
     private int _levelIndex;
+    private LevelData? _currentLevel;
     private bool _inputLocked;
+    private bool _awaitingRestart;   // dead or timed out; any input restarts
+    private double _timeLeft;        // seconds; <= 0 while untimed
+    private int _shownSeconds = -1;
+    private double _slideCooldown;
 
     private Board _board = null!;
     private Camera2D _camera = null!;
     private Label _titleLabel = null!;
     private Label _chipsLabel = null!;
+    private Label _invLabel = null!;
     private Label _hintLabel = null!;
     private PanelContainer _hintPanel = null!;
     private PanelContainer _banner = null!;
@@ -88,8 +95,12 @@ public partial class Main : Node2D
         _titleLabel.AddThemeFontSizeOverride("font_size", 26);
         _chipsLabel = new Label { HorizontalAlignment = HorizontalAlignment.Center };
         _chipsLabel.AddThemeFontSizeOverride("font_size", 20);
+        _invLabel = new Label { HorizontalAlignment = HorizontalAlignment.Center };
+        _invLabel.AddThemeFontSizeOverride("font_size", 16);
+        _invLabel.AddThemeColorOverride("font_color", new Color(0.8f, 0.8f, 0.85f));
         mid.AddChild(_titleLabel);
         mid.AddChild(_chipsLabel);
+        mid.AddChild(_invLabel);
         row.AddChild(mid);
 
         var next = MakeNavButton(">");
@@ -136,10 +147,15 @@ public partial class Main : Node2D
     {
         _levelIndex = ((index % _levels.Count) + _levels.Count) % _levels.Count;
         var level = _levels[_levelIndex];
+        _currentLevel = level;
         _board.LoadLevel(level);
         _titleLabel.Text = $"{level.Number}. {level.Title}";
         _banner.Visible = false;
         _inputLocked = false;
+        _awaitingRestart = false;
+        _timeLeft = level.TimeLimit;
+        _shownSeconds = -1;
+        _slideCooldown = 0;
         _autoPath = null;
         _touches.Clear();
         _pinching = false;
@@ -155,7 +171,27 @@ public partial class Main : Node2D
     {
         var state = _board.State;
         if (state == null) return;
-        _chipsLabel.Text = $"chips left: {state.ChipsRemaining}";
+
+        var time = _currentLevel is { TimeLimit: > 0 }
+            ? $"   time: {Mathf.Max(0, Mathf.CeilToInt(_timeLeft))}"
+            : "";
+        _chipsLabel.Text = $"chips left: {state.ChipsRemaining}{time}";
+
+        var keys = "";
+        if (state.GetKeyCount(Tile.KeyRed) > 0) keys += $" R{state.GetKeyCount(Tile.KeyRed)}";
+        if (state.GetKeyCount(Tile.KeyBlue) > 0) keys += $" B{state.GetKeyCount(Tile.KeyBlue)}";
+        if (state.GetKeyCount(Tile.KeyYellow) > 0) keys += $" Y{state.GetKeyCount(Tile.KeyYellow)}";
+        if (state.GetKeyCount(Tile.KeyGreen) > 0) keys += " G";
+        var boots = "";
+        if (state.HasFlippers) boots += " flippers";
+        if (state.HasFireBoots) boots += " fire";
+        if (state.HasSkates) boots += " skates";
+        if (state.HasSuction) boots += " suction";
+        _invLabel.Text = (keys.Length > 0 ? $"keys:{keys}" : "")
+            + (keys.Length > 0 && boots.Length > 0 ? "   " : "")
+            + (boots.Length > 0 ? $"boots:{boots}" : "");
+        _invLabel.Visible = _invLabel.Text.Length > 0;
+
         _hintPanel.Visible = state.OnHint && state.Hint.Length > 0;
         _hintLabel.Text = state.Hint;
     }
@@ -165,10 +201,64 @@ public partial class Main : Node2D
         if (!_freeCam)
             _camera.Position = _board.ChipPixelCenter;
 
+        if (_awaitingRestart)
+        {
+            if (KeyboardDirection() != Direction.None || Input.IsActionJustPressed("ui_accept"))
+                LoadLevel(_levelIndex);
+            return;
+        }
+
         if (_inputLocked) return;
+
+        // Level timer.
+        if (_currentLevel is { TimeLimit: > 0 })
+        {
+            _timeLeft -= delta;
+            var seconds = Mathf.CeilToInt(_timeLeft);
+            if (seconds != _shownSeconds)
+            {
+                _shownSeconds = seconds;
+                RefreshHud();
+            }
+            if (_timeLeft <= 0)
+            {
+                ShowDeath("Out of time!");
+                return;
+            }
+        }
+
+        var state = _board.State;
 
         var held = KeyboardDirection();
         if (held == Direction.None) held = _touchDir;
+
+        // Involuntary sliding (ice, force floors) runs on its own faster
+        // cadence. Player input is still consulted first so force-floor
+        // overrides work; the engine rejects anything illegal.
+        if (state is { SlideDir: not Direction.None })
+        {
+            _autoPath = null;
+            if (held != Direction.None && held != _lastHeld)
+            {
+                _lastHeld = held;
+                if (DoMove(held) != MoveResult.Blocked)
+                    return; // successful override; slide state recomputed
+            }
+            else if (held == Direction.None)
+            {
+                _lastHeld = Direction.None;
+            }
+
+            _slideCooldown -= delta;
+            if (_slideCooldown <= 0)
+            {
+                _slideCooldown += SlideDelay;
+                HandleResult(_board.SlideStep());
+                RefreshHud();
+            }
+            return;
+        }
+        _slideCooldown = 0;
 
         if (held != Direction.None)
         {
@@ -220,6 +310,13 @@ public partial class Main : Node2D
 
     public override void _UnhandledInput(InputEvent @event)
     {
+        if (_awaitingRestart)
+        {
+            if (@event is InputEventScreenTouch { Pressed: false })
+                LoadLevel(_levelIndex);
+            return;
+        }
+
         switch (@event)
         {
             case InputEventScreenTouch touch when touch.Pressed:
@@ -331,15 +428,40 @@ public partial class Main : Node2D
         ResumeFollow();
         var result = _board.TryMove(dir);
         RefreshHud();
-        if (result != MoveResult.Won) return result;
+        HandleResult(result);
+        return result;
+    }
 
-        _inputLocked = true;
+    private void HandleResult(MoveResult result)
+    {
+        switch (result)
+        {
+            case MoveResult.Won:
+                _inputLocked = true;
+                ClearInputState();
+                _bannerLabel.Text = "  Level Complete!  ";
+                _banner.Visible = true;
+                GetTree().CreateTimer(1.5).Timeout += () => LoadLevel(_levelIndex + 1);
+                break;
+            case MoveResult.Died:
+                ShowDeath(_board.State?.DeathReason ?? "");
+                break;
+        }
+    }
+
+    private void ShowDeath(string reason)
+    {
+        _awaitingRestart = true;
+        ClearInputState();
+        _bannerLabel.Text = $"  Ooops! {reason}  \n  (tap to retry)  ";
+        _banner.Visible = true;
+    }
+
+    private void ClearInputState()
+    {
         _touchDir = Direction.None;
         _touchAnchor = null;
         _autoPath = null;
-        _bannerLabel.Text = "  Level Complete!  ";
-        _banner.Visible = true;
-        GetTree().CreateTimer(1.5).Timeout += () => LoadLevel(_levelIndex + 1);
-        return result;
+        _lastHeld = Direction.None;
     }
 }

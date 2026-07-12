@@ -1,11 +1,13 @@
 namespace ChipsCore;
 
 /// <summary>
-/// BFS shortest-path for tap-to-move. Plans over tiles that are enterable
-/// *right now* (per GameState.CanEnter); it does not simulate pickups or
-/// key consumption along the way. The executor re-validates every step by
-/// calling TryMove and aborts the path on a blocked result, so a stale
-/// plan degrades into a shorter walk, never an illegal one.
+/// BFS shortest-path for tap-to-move. Plans over tiles that are safely
+/// walkable *right now* (per GameState.PathSafe — no hazards without the
+/// right boots, no slides or teleports that would take control away); it
+/// does not simulate pickups or key consumption along the way. The
+/// executor re-validates every step by calling TryMove and aborts the
+/// path on a blocked result, so a stale plan degrades into a shorter
+/// walk, never an illegal or lethal one.
 /// </summary>
 public static class Pathfinder
 {
@@ -22,7 +24,7 @@ public static class Pathfinder
         var start = state.ChipY * GameState.Width + state.ChipX;
         var target = targetY * GameState.Width + targetX;
         if (start == target) return new List<Direction>();
-        if (!state.CanEnter(targetX, targetY)) return null;
+        if (!state.PathSafe(targetX, targetY)) return null;
 
         var cameBy = new Direction[GameState.Width * GameState.Height];
         var queue = new Queue<int>();
@@ -44,7 +46,7 @@ public static class Pathfinder
                 var next = ny * GameState.Width + nx;
                 if (cameBy[next] != Direction.None || next == start)
                     continue;
-                if (!state.CanEnter(nx, ny))
+                if (!state.CanCross(x, y, dir) || !state.PathSafe(nx, ny))
                     continue;
                 cameBy[next] = dir;
                 if (next == target)
