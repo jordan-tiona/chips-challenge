@@ -190,7 +190,7 @@ public sealed class GameState
         var result = Step(SlideDir);
         if (result == MoveResult.Blocked)
         {
-            if (IsIce(GetTile(ChipX, ChipY)))
+            if (IsIce(GetTile(ChipX, ChipY)) || GetTile(ChipX, ChipY) == Tile.Teleport)
             {
                 if (_iceBounceFailed)
                 {
@@ -212,11 +212,16 @@ public sealed class GameState
         return result;
     }
 
-    private MoveResult Step(Direction dir)
+    private MoveResult Step(Direction dir, bool exitingTeleport = false)
     {
         var fromIdx = ChipY * Width + ChipX;
         if (GetTile(ChipX, ChipY) == Tile.Trap && !IsTrapOpen(fromIdx))
             return MoveResult.Blocked;
+
+        // Standing on a teleport, any move relays through the network
+        // first (MS lets you steer the exit by holding a direction).
+        if (!exitingTeleport && GetTile(ChipX, ChipY) == Tile.Teleport)
+            return TeleportChip(dir);
 
         var (dx, dy) = dir.Delta();
         var toX = ChipX + dx;
@@ -326,10 +331,11 @@ public sealed class GameState
             case Tile.ButtonGreen or Tile.ButtonRed or Tile.ButtonBlue or Tile.ButtonBrown:
                 PressButton(ChipY * Width + ChipX);
                 break;
-            case Tile.Teleport:
-                return TeleportChip(dir);
         }
 
+        // Teleports are slip floors (TW): landing on one starts a slip;
+        // the relay happens on the slide clock — which also clears Chip's
+        // move gate, i.e. teleport boosting.
         SlideDir = ComputeSlide(here, dir, hasSkates: HasSkates, hasSuction: HasSuction);
         return MoveResult.Moved;
     }
@@ -478,7 +484,7 @@ public sealed class GameState
 
             if (!TryActorStep(m, m.SlideDir))
             {
-                if (IsIce(GetTile(m.X, m.Y)))
+                if (IsIce(GetTile(m.X, m.Y)) || GetTile(m.X, m.Y) == Tile.Teleport)
                 {
                     m.SlideDir = Opposite(m.SlideDir);
                     if (!TryActorStep(m, m.SlideDir)) m.SlideDir = Direction.None;
@@ -532,8 +538,12 @@ public sealed class GameState
     /// <summary>Try to move a monster one tile. Handles Chip contact,
     /// hazard deaths, buttons, traps, teleports, and slide startup.
     /// Updates facing on success.</summary>
-    private bool TryActorStep(Actor m, Direction dir)
+    private bool TryActorStep(Actor m, Direction dir, bool exitingTeleport = false)
     {
+        // Standing on a teleport: moving means relaying through the network.
+        if (!exitingTeleport && GetTile(m.X, m.Y) == Tile.Teleport)
+            return TeleportActor(m, dir);
+
         var (dx, dy) = dir.Delta();
         var toX = m.X + dx;
         var toY = m.Y + dy;
@@ -571,11 +581,9 @@ public sealed class GameState
             case Tile.ButtonGreen or Tile.ButtonRed or Tile.ButtonBlue or Tile.ButtonBrown:
                 PressButton(toIdx);
                 break;
-            case Tile.Teleport:
-                TeleportActor(m, dir);
-                break;
         }
 
+        // Landing on a teleport starts a slip (relay on the slide clock).
         m.SlideDir = ComputeSlide(GetTile(m.X, m.Y), dir, hasSkates: false, hasSuction: false);
         return true;
     }
@@ -595,11 +603,11 @@ public sealed class GameState
         _monsterAt.Remove(m.Y * Width + m.X);
     }
 
-    private void TeleportActor(Actor m, Direction dir)
+    private bool TeleportActor(Actor m, Direction dir)
     {
         var entered = m.Y * Width + m.X;
         var enteredAt = _teleports.IndexOf(entered);
-        if (enteredAt < 0) return;
+        if (enteredAt < 0) return false;
         for (var n = 1; n <= _teleports.Count; n++)
         {
             var candidate = _teleports[Mod(enteredAt - n, _teleports.Count)];
@@ -613,9 +621,9 @@ public sealed class GameState
             if (!MonsterCanEnter(m.Type, _tiles[outIdx])) continue;
 
             MoveActor(m, cx, cy, dir);
-            TryActorStep(m, dir);
-            return;
+            return TryActorStep(m, dir, exitingTeleport: true);
         }
+        return false; // stranded; the slip keeps retrying on later ticks
     }
 
     private static bool MonsterCanEnter(ActorType type, Tile t) => t switch
@@ -634,6 +642,8 @@ public sealed class GameState
 
     private Direction ComputeSlide(Tile here, Direction dir, bool hasSkates, bool hasSuction)
     {
+        if (here == Tile.Teleport)
+            return dir; // slip through the network on the slide clock
         if (IsIce(here) && !hasSkates)
             return RedirectOnIce(here, dir);
         if (IsForce(here) && !hasSuction)
@@ -693,10 +703,11 @@ public sealed class GameState
 
             ChipX = cx;
             ChipY = cy;
-            return Step(dir); // exit the destination teleport, full effects
+            return Step(dir, exitingTeleport: true); // exit with full effects
         }
-        SlideDir = Direction.None;
-        return MoveResult.Moved;
+        // Every exit blocked: stay put; the slip keeps retrying (and the
+        // slip processor may bounce the direction, like TW).
+        return MoveResult.Blocked;
     }
 
     /// <summary>Rough enterability used for teleport exits (full rules run
@@ -1002,9 +1013,11 @@ public sealed class GameState
             {
                 if (e.IsChip) _chipHasMoved = false; // pressed, still boosting
             }
-            else if (IsIce(floor))
+            else if (IsIce(floor) || floor == Tile.Teleport)
             {
-                var back = RedirectOnIce(floor, Opposite(dir));
+                var back = floor == Tile.Teleport
+                    ? Opposite(dir)
+                    : RedirectOnIce(floor, Opposite(dir));
                 SetSlipDir(e, back);
                 if (StepSlipEntity(e, back))
                 {

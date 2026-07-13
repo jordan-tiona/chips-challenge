@@ -308,17 +308,28 @@ public class M2Tests
     [Fact]
     public void Teleport_Relays_To_Previous_In_Reading_Order()
     {
+        // Teleports are slip floors: enter, then the relay happens on the
+        // slide clock (which is also what makes teleport boosting work).
         var s = NewState((6, 5, 0x29), (2, 2, 0x29));
         Assert.Equal(MoveResult.Moved, s.TryMove(Direction.Right));
+        Assert.Equal((6, 5), (s.ChipX, s.ChipY));
+        Assert.Equal(Direction.Right, s.SlideDir);
+        Assert.Equal(MoveResult.Moved, s.SlideStep());
         Assert.Equal((3, 2), (s.ChipX, s.ChipY)); // exited the other teleport, still moving right
     }
 
     [Fact]
-    public void Teleport_With_All_Exits_Blocked_Strands_Chip()
+    public void Teleport_With_Blocked_Exits_Bounces_Chip_Back_Out()
     {
-        var s = NewState((6, 5, 0x29), (2, 2, 0x29), (3, 2, 0x01), (7, 5, 0x01));
+        // Both forward exits and the other teleport's reverse exit are
+        // walled; TW reverses the slip and Chip pops back out where he
+        // entered.
+        var s = NewState((6, 5, 0x29), (2, 2, 0x29),
+            (7, 5, 0x01), (3, 2, 0x01), (1, 2, 0x01));
         Assert.Equal(MoveResult.Moved, s.TryMove(Direction.Right));
-        Assert.Equal((6, 5), (s.ChipX, s.ChipY));
+        for (var i = 0; i < 4 && s.SlideDir != Direction.None; i++)
+            s.SlideStep();
+        Assert.Equal((5, 5), (s.ChipX, s.ChipY)); // back where he started
         Assert.Equal(Direction.None, s.SlideDir);
     }
 
