@@ -280,13 +280,21 @@ public partial class Main : Node2D
         if (state is { SlideDir: not Direction.None })
         {
             _autoPath = null;
-            if (held != Direction.None && held != _lastHeld)
+            // Held input keeps trying to override on the normal walk
+            // cadence (fighting a force floor needs repeated overrides);
+            // the engine ignores it on ice.
+            if (held != Direction.None)
             {
-                _lastHeld = held;
-                if (DoMove(held) != MoveResult.Blocked)
-                    return; // successful override; slide state recomputed
+                _cooldown -= delta;
+                if (held != _lastHeld || _cooldown <= 0)
+                {
+                    _lastHeld = held;
+                    _cooldown = RepeatDelay;
+                    if (DoMove(held) != MoveResult.Blocked)
+                        return; // successful override; slide state recomputed
+                }
             }
-            else if (held == Direction.None)
+            else
             {
                 _lastHeld = Direction.None;
             }

@@ -33,11 +33,14 @@ public static class TileCodes
         0x17 => Tile.DoorRed,
         0x18 => Tile.DoorGreen,
         0x19 => Tile.DoorYellow,
-        // Ice corner codes per the CC1 spec; verify against TWS replays in M4.
-        0x1A => Tile.IceSE,
-        0x1B => Tile.IceSW,
-        0x1C => Tile.IceNW,
-        0x1D => Tile.IceNE,
+        // Ice corners: the spec names these by the OPENING ("0x1A = south/
+        // east"), our enum names them by their WALLS. Verified against the
+        // actual geometry of CCLP1 #2 (Slip and Slide): 0x1A sits with
+        // real walls to its N and W, so it is wall-NW / open-SE.
+        0x1A => Tile.IceNW,
+        0x1B => Tile.IceNE,
+        0x1C => Tile.IceSE,
+        0x1D => Tile.IceSW,
         0x1E => Tile.FakeWall,   // blue wall (fake)
         0x1F => Tile.Wall,       // blue wall (real)
         0x21 => Tile.Thief,

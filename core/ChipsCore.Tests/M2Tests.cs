@@ -83,12 +83,20 @@ public class M2Tests
     [Fact]
     public void Ice_Corner_Redirects_The_Slide()
     {
-        // IceSE (walls S+E) entered moving right: curve turns the slide north.
-        var s = NewState((6, 5, 0x1A));
+        // 0x1C = walls S+E: entered moving right, the curve turns the slide north.
+        var s = NewState((6, 5, 0x1C));
         Assert.Equal(MoveResult.Moved, s.TryMove(Direction.Right));
         Assert.Equal(Direction.Up, s.SlideDir);
         Assert.Equal(MoveResult.Moved, s.SlideStep());
         Assert.Equal((6, 4), (s.ChipX, s.ChipY));
+    }
+
+    [Fact]
+    public void Ice_Corner_Walls_Block_Entry()
+    {
+        // 0x1A = walls N+W: entering from the west crosses its W wall.
+        var s = NewState((6, 5, 0x1A));
+        Assert.Equal(MoveResult.Blocked, s.TryMove(Direction.Right));
     }
 
     [Fact]
@@ -103,14 +111,15 @@ public class M2Tests
     }
 
     [Fact]
-    public void Force_Floor_Allows_Perpendicular_Override_Only()
+    public void Force_Floor_Can_Be_Overridden_In_Any_Direction()
     {
-        var s = NewState((6, 5, 0x13), (7, 5, 0x13));
+        // Including against the force: CCLP1 #2's skates sit behind a
+        // south-pointing force floor.
+        var s = NewState((6, 5, 0x0D)); // force south
         s.TryMove(Direction.Right);
-        Assert.Equal(MoveResult.Blocked, s.TryMove(Direction.Right));
-        Assert.Equal(MoveResult.Blocked, s.TryMove(Direction.Left));
-        Assert.Equal(MoveResult.Moved, s.TryMove(Direction.Up));
-        Assert.Equal((6, 4), (s.ChipX, s.ChipY));
+        Assert.Equal(Direction.Down, s.SlideDir);
+        Assert.Equal(MoveResult.Moved, s.TryMove(Direction.Right)); // push through
+        Assert.Equal((7, 5), (s.ChipX, s.ChipY));
         Assert.Equal(Direction.None, s.SlideDir);
     }
 

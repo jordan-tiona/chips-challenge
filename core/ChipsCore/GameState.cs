@@ -113,13 +113,12 @@ public sealed class GameState
     {
         if (Won || IsDead || dir == Direction.None) return MoveResult.Blocked;
 
-        if (SlideDir != Direction.None)
-        {
-            var here = GetTile(ChipX, ChipY);
-            if (IsIce(here)) return MoveResult.Blocked;
-            if (IsForce(here) && (dir == SlideDir || dir == Opposite(SlideDir)))
-                return MoveResult.Blocked;
-        }
+        // No control on ice. On force floors any direction may be
+        // overridden — CCLP1 #2 requires stepping against the force to
+        // reach the skates, and its hint says as much. (MS technically
+        // allows this only on alternating ticks; M4 refines the timing.)
+        if (SlideDir != Direction.None && IsIce(GetTile(ChipX, ChipY)))
+            return MoveResult.Blocked;
 
         return Step(dir);
     }
