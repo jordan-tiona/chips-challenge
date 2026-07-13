@@ -36,6 +36,7 @@ public partial class Main : Node2D
     private PanelContainer _hintPanel = null!;
     private PanelContainer _banner = null!;
     private Label _bannerLabel = null!;
+    private TouchIndicator _touchIndicator = null!;
 
     private const float MinZoom = 0.7f;   // whole 32x32 map fits on screen
     private const float MaxZoom = 3f;
@@ -93,6 +94,15 @@ public partial class Main : Node2D
         _safeArea.AddChild(root);
         GetTree().Root.SizeChanged += ApplySafeAreaMargins;
         ApplySafeAreaMargins();
+
+        _touchIndicator = new TouchIndicator
+        {
+            MouseFilter = Control.MouseFilterEnum.Ignore,
+            StepRadius = SwipeThreshold,
+            RunRadius = RunThreshold,
+        };
+        _touchIndicator.SetAnchorsPreset(Control.LayoutPreset.FullRect);
+        hud.AddChild(_touchIndicator); // outside the safe area: rings follow the finger
 
         // ---- top bar: prev | title + chips | next ----
         var topBar = new PanelContainer();
@@ -371,6 +381,7 @@ public partial class Main : Node2D
                 {
                     _touchAnchor = touch.Position;
                     _touchDir = Direction.None;
+                    _touchIndicator.Begin(touch.Position);
                 }
                 else
                 {
@@ -379,6 +390,7 @@ public partial class Main : Node2D
                     _touchDir = Direction.None;
                     _pinching = true;
                     _camera.PositionSmoothingEnabled = false; // 1:1 pan feel
+                    _touchIndicator.End();
                 }
                 break;
 
@@ -392,6 +404,7 @@ public partial class Main : Node2D
                 _touchAnchor = null;
                 _touchDir = Direction.None;
                 _touchRun = false;
+                _touchIndicator.End();
                 break;
 
             case InputEventScreenDrag drag:
@@ -407,6 +420,7 @@ public partial class Main : Node2D
                     else
                         _touchDir = Direction.None;
                     _touchRun = delta.Length() >= RunThreshold;
+                    _touchIndicator.Update(drag.Position);
                 }
                 if (_touches.ContainsKey(drag.Index))
                     _touches[drag.Index] = drag.Position;
