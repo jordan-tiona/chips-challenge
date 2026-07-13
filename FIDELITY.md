@@ -7,9 +7,9 @@ Cclp1ReplayTests when the pass count improves.
 
 _Last run: 2026-07-13_
 
-- **Win**: 84
+- **Win**: 86
 - **Death**: 48
-- **NoWin**: 10
+- **NoWin**: 8
 - **Unsupported**: 7
 
 ## Failures
@@ -19,7 +19,6 @@ _Last run: 2026-07-13_
 - #18 Square Dancing: Death at t=108 — Look out for creatures! at (15,8)
 - #20 Chip Suey: Death at t=552 — Look out for creatures! at (24,9)
 - #23 Circles: Unsupported at t=0 — solution uses mouse or diagonal moves
-- #27 Teleport Depot: NoWin at t=540 — moves used 101/101, chip at (18,12), chips left 0
 - #28 The Last Starfighter: Death at t=807 — Chip can't swim without flippers! at (3,8)
 - #30 Button Brigade: NoWin at t=820 — moves used 153/153, chip at (11,19), chips left 0
 - #35 Mystery Wall: Death at t=1424 — Look out for creatures! at (8,13)
@@ -32,8 +31,7 @@ _Last run: 2026-07-13_
 - #58 Corral: Death at t=124 — Look out for creatures! at (15,19)
 - #63 New Block in Town: NoWin at t=732 — moves used 142/142, chip at (12,14), chips left 0
 - #66 Klausswergner: Death at t=524 — Look out for creatures! at (7,18)
-- #67 Booster Shots: NoWin at t=2120 — moves used 385/385, chip at (10,30), chips left 20
-- #73 Occupied: Death at t=1208 — Look out for creatures! at (15,29)
+- #73 Occupied: Death at t=316 — Look out for creatures! at (16,19)
 - #74 Traveler: Death at t=1608 — Look out for creatures! at (19,21)
 - #76 Funfair: Death at t=2328 — Look out for creatures! at (12,4)
 - #80 Flipside: Death at t=628 — Look out for creatures! at (12,28)
@@ -50,8 +48,8 @@ _Last run: 2026-07-13_
 - #100 Loose Pocket: Death at t=180 — Look out for creatures! at (13,10)
 - #101 Time Suspension: Death at t=2872 — Don't step on the bombs! at (10,29)
 - #103 Portcullis: Death at t=20 — Look out for creatures! at (14,13)
-- #106 Jailbird: Death at t=84 — Look out for creatures! at (15,15)
-- #109 Green Clear: NoWin at t=1544 — moves used 337/337, chip at (20,8), chips left 0
+- #106 Jailbird: Death at t=156 — Don't step on the bombs! at (8,17)
+- #109 Green Clear: NoWin at t=1544 — moves used 337/337, chip at (15,8), chips left 0
 - #110 Badlands: Death at t=2124 — Look out for creatures! at (4,6)
 - #113 Teleport Trouble: Unsupported at t=0 — solution uses mouse or diagonal moves
 - #114 Comfort Zone: Death at t=164 — Look out for creatures! at (23,6)
@@ -61,7 +59,7 @@ _Last run: 2026-07-13_
 - #118 Runaway Train: Death at t=100 — Look out for creatures! at (18,7)
 - #119 The Sewers: NoWin at t=2770 — moves used 622/622, chip at (15,16), chips left 5
 - #120 Metal Harbor: Unsupported at t=0 — solution uses mouse or diagonal moves
-- #121 Chip Plank Galleon: Death at t=664 — Look out for creatures! at (21,25)
+- #121 Chip Plank Galleon: Death at t=596 — Look out for creatures! at (23,28)
 - #123 The Very Hungry Caterpillar: Death at t=648 — Look out for creatures! at (9,1)
 - #124 Utter Clutter: Death at t=176 — Look out for creatures! at (21,28)
 - #126 Peek-a-Boo: Death at t=1844 — Chip can't swim without flippers! at (7,15)

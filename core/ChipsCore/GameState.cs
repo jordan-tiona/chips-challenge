@@ -378,8 +378,17 @@ public sealed class GameState
                 }
                 break;
 
-            // Brown buttons need no action: traps are open while any
-            // wired button is held down (see IsTrapOpen).
+            case Tile.ButtonBrown:
+                // Traps stay open while the button is held (IsTrapOpen);
+                // additionally, pressing SPRINGS a caged monster out
+                // immediately (MS ejection), in its facing direction.
+                foreach (var (button, trap) in _trapWiring)
+                {
+                    if (button != idx) continue;
+                    if (_monsterAt.TryGetValue(trap, out var caged) && !caged.Dead)
+                        TryActorStep(caged, caged.Dir);
+                }
+                break;
         }
     }
 
@@ -697,6 +706,7 @@ public sealed class GameState
             var cy = candidate / Width;
             var (dx, dy) = dir.Delta();
             if (_monsterAt.ContainsKey(candidate)) continue;
+            if (candidate != entered && _blocks.ContainsKey(candidate)) continue;
             if (!CanCross(cx, cy, dir)) continue;
             if (HasBlockAt(cx + dx, cy + dy)) continue;
             if (!IsChipEnterable(GetTile(cx + dx, cy + dy))) continue;
@@ -832,7 +842,7 @@ public sealed class GameState
     private static bool BlockCanRest(Tile t) => t switch
     {
         Tile.Floor or Tile.Hint or Tile.Gravel or Tile.Water or Tile.Fire or Tile.Bomb
-            or Tile.Trap or Tile.ToggleOpen
+            or Tile.Trap or Tile.ToggleOpen or Tile.Teleport
             or Tile.ButtonGreen or Tile.ButtonRed or Tile.ButtonBrown or Tile.ButtonBlue
             or Tile.Ice or Tile.IceNW or Tile.IceNE or Tile.IceSW or Tile.IceSE
             or Tile.ForceN or Tile.ForceS or Tile.ForceE or Tile.ForceW or Tile.ForceRandom
@@ -1090,6 +1100,11 @@ public sealed class GameState
     {
         var idx = e.BlockIdx;
         if (!_blocks.ContainsKey(idx)) return false;
+
+        // Blocks travel through teleport networks too (MS).
+        if (_tiles[idx] == Tile.Teleport)
+            return TeleportBlock(e, dir);
+
         var x = idx % Width;
         var y = idx / Width;
         var (dx, dy) = dir.Delta();
@@ -1116,6 +1131,46 @@ public sealed class GameState
         SettleBlock(toX, toY, facing, dir);
         e.BlockIdx = toIdx;
         return true;
+    }
+
+    /// <summary>Relay a block standing on a teleport: destination is the
+    /// previous teleport in reading order with a free exit.</summary>
+    private bool TeleportBlock(SlipEntry e, Direction dir)
+    {
+        var entered = e.BlockIdx;
+        var enteredAt = _teleports.IndexOf(entered);
+        if (enteredAt < 0) return false;
+        var (dx, dy) = dir.Delta();
+        for (var n = 1; n <= _teleports.Count; n++)
+        {
+            var candidate = _teleports[Mod(enteredAt - n, _teleports.Count)];
+            var cx = candidate % Width;
+            var cy = candidate / Width;
+            var outIdx = (cy + dy) * Width + (cx + dx);
+            if (candidate != entered
+                && (_blocks.ContainsKey(candidate) || _monsterAt.ContainsKey(candidate)))
+                continue;
+            if (!CanCross(cx, cy, dir)) continue;
+            if (_blocks.ContainsKey(outIdx)) continue;
+            if (_monsterAt.TryGetValue(outIdx, out var m) && !m.Dead) continue;
+            var chipAtExit = cx + dx == ChipX && cy + dy == ChipY;
+            if (!chipAtExit && !BlockCanRest(_tiles[outIdx])) continue;
+
+            var facing = _blocks[entered];
+            _blocks.Remove(entered);
+            _slidingBlocks.Remove(entered);
+            if (chipAtExit)
+            {
+                _blocks[outIdx] = facing;
+                e.BlockIdx = outIdx;
+                Die("Watch out for sliding blocks!");
+                return true;
+            }
+            SettleBlock(cx + dx, cy + dy, facing, dir);
+            e.BlockIdx = outIdx;
+            return true;
+        }
+        return false; // no exit; slip retries/bounces
     }
 
     // ---------------------------------------------------------------- helpers

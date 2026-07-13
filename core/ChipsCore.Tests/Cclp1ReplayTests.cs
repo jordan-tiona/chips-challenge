@@ -11,7 +11,7 @@ namespace ChipsCore.Tests;
 public class Cclp1ReplayTests
 {
     /// <summary>Currently-passing replay count. 149 is the destination.</summary>
-    private const int PassFloor = 84;
+    private const int PassFloor = 86;
 
     private readonly ITestOutputHelper _output;
 
