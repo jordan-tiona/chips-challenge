@@ -9,6 +9,7 @@ namespace ChipsChallenge;
 public partial class Main : Node2D
 {
     private const double TickSeconds = 0.05;   // engine runs at 20 ticks/second
+    private const double RepeatGraceSeconds = 0.3; // hold this long before a gesture repeats
     private const float SwipeThreshold = 48f;  // px of drag that counts as a swipe
     private const float TapSlop = 24f;         // max px of finger travel for a tap
 
@@ -21,6 +22,9 @@ public partial class Main : Node2D
     private int _shownSeconds = -1;
     private double _tickAccum;
     private int _pathStall;
+    private Direction _heldPrev = Direction.None;
+    private double _heldDuration;
+    private bool _steppedOnce;   // this gesture already produced its single step
 
     private Board _board = null!;
     private Camera2D _camera = null!;
@@ -277,6 +281,20 @@ public partial class Main : Node2D
         if (held != Direction.None)
             _autoPath = null; // manual input always wins over a tapped path
 
+        // Single-step debounce: a fresh gesture yields exactly one step;
+        // only holding it past the grace period turns into running.
+        if (held != _heldPrev)
+        {
+            _heldPrev = held;
+            _heldDuration = 0;
+            _steppedOnce = false;
+        }
+        else
+        {
+            _heldDuration += delta;
+        }
+        var repeating = _heldDuration >= RepeatGraceSeconds;
+
         // Pump the engine at 20 ticks/second; it does all its own gating
         // (walk speed, slides, monsters, boosting).
         _tickAccum += delta;
@@ -286,7 +304,7 @@ public partial class Main : Node2D
             _tickAccum -= TickSeconds;
             ticked = true;
 
-            var input = held;
+            var input = _steppedOnce && !repeating ? Direction.None : held;
             var pathMove = false;
             if (input == Direction.None && _autoPath is { Count: > 0 })
             {
@@ -296,8 +314,13 @@ public partial class Main : Node2D
             if (input != Direction.None) ResumeFollow();
 
             var before = (state.ChipX, state.ChipY);
+            var tickNow = state.CurrentTick;
             HandleResult(_board.Advance(input));
             if (_awaitingRestart || _inputLocked) return;
+
+            if (!pathMove && input != Direction.None
+                && state.LastVoluntaryMoveTick == tickNow)
+                _steppedOnce = true;
 
             if (pathMove && _autoPath != null)
             {

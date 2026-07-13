@@ -939,12 +939,21 @@ public sealed class GameState
         if (input != Direction.None && !_chipHasMoved)
         {
             var result = TryMove(input); // handles ice lock + same-dir discard
-            if (result != MoveResult.Blocked) _chipHasMoved = true;
+            if (result != MoveResult.Blocked)
+            {
+                _chipHasMoved = true;
+                LastVoluntaryMoveTick = t;
+            }
             if (result is MoveResult.Died or MoveResult.Won) return result;
         }
 
         return MoveResult.Moved;
     }
+
+    /// <summary>Tick of Chip's most recent successful voluntary move —
+    /// lets the shell distinguish "my input landed" from slide movement
+    /// (used for single-step input debouncing).</summary>
+    public int LastVoluntaryMoveTick { get; private set; } = -1;
 
     /// <summary>Non-sliding creature decisions (TW: every 4th tick).</summary>
     private void MonsterDecisions(int tick)
