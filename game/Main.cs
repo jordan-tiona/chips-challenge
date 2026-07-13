@@ -255,6 +255,11 @@ public partial class Main : Node2D
 
     public override void _Process(double delta)
     {
+        // A frame hitch must pause the world, not fast-forward it: without
+        // this, banked ticks burst (multi-tile jumps) and a long frame can
+        // inflate the hold clock past the run grace mid-swipe.
+        delta = Mathf.Min(delta, 0.1);
+
         if (!_freeCam)
             _camera.Position = _board.ChipPixelCenter;
 

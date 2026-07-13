@@ -24,8 +24,8 @@ public partial class Board : Node2D
     // chain into constant velocity (fully continuous motion, up to ~1
     // tile behind the lethal truth — the Lynx look). Falling further
     // behind triggers catch-up; jumps beyond 1.6 tiles (teleports) snap.
-    private const float SnapDistance = TileSize * 1.6f;
-    private const float CatchUpDistance = TileSize * 1.15f;
+    private const float SnapDistance = TileSize * 2.5f; // true teleports only
+    private const float CatchUpDistance = TileSize * 1.1f;
     private Vector2 _chipVisual;
     private readonly Dictionary<Actor, Vector2> _monsterVisual = new();
     private readonly Dictionary<int, Vector2> _blockVisual = new();
@@ -71,10 +71,12 @@ public partial class Board : Node2D
     /// the visual falls more than a step behind.</summary>
     private static Vector2 Chase(Vector2 current, Vector2 target, float delta, float tilesPerSecond)
     {
+        delta = Mathf.Min(delta, 0.1f); // hitch guard, mirrors the shell
         var distance = current.DistanceTo(target);
         if (distance > SnapDistance) return target;
-        var speed = TileSize * tilesPerSecond * 1.04f;
-        if (distance > CatchUpDistance) speed *= 1.6f;
+        var speed = TileSize * tilesPerSecond * 1.08f;
+        if (distance > CatchUpDistance)
+            speed = Mathf.Max(speed * 2f, distance / 0.12f); // sprint, don't teleport
         return current.MoveToward(target, speed * delta);
     }
 
