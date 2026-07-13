@@ -23,6 +23,7 @@ public partial class Main : Node2D
     private int _shownSeconds = -1;
     private double _slideCooldown;
     private double _monsterCooldown;
+    private double _blockSlideCooldown;
 
     private Board _board = null!;
     private Camera2D _camera = null!;
@@ -281,6 +282,22 @@ public partial class Main : Node2D
             _monsterCooldown += MonsterDelay;
             HandleResult(_board.MonsterTick());
             if (_awaitingRestart) return;
+        }
+
+        // Sliding blocks share the slide clock.
+        if (state is { AnyBlocksSliding: true })
+        {
+            _blockSlideCooldown -= delta;
+            if (_blockSlideCooldown <= 0)
+            {
+                _blockSlideCooldown += SlideDelay;
+                HandleResult(_board.SlideBlocks());
+                if (_awaitingRestart) return;
+            }
+        }
+        else
+        {
+            _blockSlideCooldown = 0;
         }
 
         var held = KeyboardDirection();

@@ -28,6 +28,7 @@ public sealed class GameState
 
     private readonly Tile[] _tiles = new Tile[Width * Height];
     private readonly Dictionary<int, Direction> _blocks = new(); // pos -> facing (clone blocks)
+    private readonly Dictionary<int, Direction> _slidingBlocks = new(); // pos -> slide dir
     private readonly List<int> _teleports = new();
     private readonly List<Actor> _monsters = new();
     private readonly Dictionary<int, Actor> _monsterAt = new();
@@ -398,7 +399,7 @@ public sealed class GameState
                 && !_monsterAt.ContainsKey(toY * Width + toX)
                 && BlockCanRest(GetTile(toX, toY)))
             {
-                SettleBlock(toX, toY, facing);
+                SettleBlock(toX, toY, facing, facing);
             }
         }
     }
@@ -660,6 +661,10 @@ public sealed class GameState
 
     // ---------------------------------------------------------------- blocks
 
+    /// <summary>Any block currently skating across ice or riding a force
+    /// floor — the shell runs the slide clock while this is true.</summary>
+    public bool AnyBlocksSliding => _slidingBlocks.Count > 0;
+
     private bool TryPushBlock(int blockX, int blockY, Direction dir)
     {
         var blockIdx = blockY * Width + blockX;
@@ -674,22 +679,24 @@ public sealed class GameState
         if (!BlockCanRest(GetTile(destX, destY))) return false;
 
         _blocks.Remove(blockIdx);
-        SettleBlock(destX, destY, Direction.None);
+        _slidingBlocks.Remove(blockIdx);
+        SettleBlock(destX, destY, Direction.None, dir);
         return true;
     }
 
-    /// <summary>Land a block on a tile, resolving water/bombs/buttons.</summary>
-    private void SettleBlock(int x, int y, Direction facing)
+    /// <summary>Land a block on a tile, resolving water/bombs/buttons and
+    /// starting a slide if it arrived on ice or a force floor.</summary>
+    private void SettleBlock(int x, int y, Direction facing, Direction arrival)
     {
         var idx = y * Width + x;
         switch (GetTile(x, y))
         {
             case Tile.Water:
                 SetTile(x, y, Tile.Dirt); // block sinks, makes dirt
-                break;
+                return;
             case Tile.Bomb:
                 SetTile(x, y, Tile.Floor); // both destroyed
-                break;
+                return;
             case Tile.ButtonGreen or Tile.ButtonRed or Tile.ButtonBlue or Tile.ButtonBrown:
                 _blocks[idx] = facing;
                 PressButton(idx);
@@ -698,6 +705,65 @@ public sealed class GameState
                 _blocks[idx] = facing;
                 break;
         }
+
+        var slide = ComputeSlide(GetTile(x, y), arrival, hasSkates: false, hasSuction: false);
+        if (slide != Direction.None) _slidingBlocks[idx] = slide;
+    }
+
+    /// <summary>Advance every sliding block one tile. Ice bounces a block
+    /// back once (then stops it); force floors keep pressing. A sliding
+    /// block that reaches Chip crushes him.</summary>
+    public MoveResult SlideBlocks()
+    {
+        if (Won || IsDead) return MoveResult.Blocked;
+
+        foreach (var (idx, dir) in _slidingBlocks.ToList())
+        {
+            if (!_slidingBlocks.ContainsKey(idx)) continue; // consumed this pass
+            var x = idx % Width;
+            var y = idx / Width;
+            var (dx, dy) = dir.Delta();
+            var toX = x + dx;
+            var toY = y + dy;
+            var toIdx = toY * Width + toX;
+
+            var blocked = !CanCross(x, y, dir)
+                || _blocks.ContainsKey(toIdx)
+                || (_monsterAt.TryGetValue(toIdx, out var m) && !m.Dead)
+                || (!(toX == ChipX && toY == ChipY) && !BlockCanRest(GetTile(toX, toY)));
+
+            if (blocked)
+            {
+                if (IsIce(GetTile(x, y)))
+                {
+                    var back = Opposite(dir);
+                    var (bx, by) = back.Delta();
+                    var canBounce = CanCross(x, y, back)
+                        && !_blocks.ContainsKey((y + by) * Width + (x + bx))
+                        && BlockCanRest(GetTile(x + bx, y + by));
+                    if (canBounce) _slidingBlocks[idx] = back;
+                    else _slidingBlocks.Remove(idx);
+                }
+                // force floors: stay pressed, keep the slide
+                continue;
+            }
+
+            if (toX == ChipX && toY == ChipY)
+            {
+                var facingC = _blocks[idx];
+                _blocks.Remove(idx);
+                _slidingBlocks.Remove(idx);
+                _blocks[toIdx] = facingC;
+                Die("Watch out for sliding blocks!");
+                return MoveResult.Died;
+            }
+
+            var facing = _blocks[idx];
+            _blocks.Remove(idx);
+            _slidingBlocks.Remove(idx);
+            SettleBlock(toX, toY, facing, dir);
+        }
+        return MoveResult.Moved;
     }
 
     private static bool BlockCanRest(Tile t) => t switch

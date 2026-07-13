@@ -46,6 +46,14 @@ public partial class Board : Node2D
         return result;
     }
 
+    public MoveResult SlideBlocks()
+    {
+        if (State == null) return MoveResult.Blocked;
+        var result = State.SlideBlocks();
+        QueueRedraw();
+        return result;
+    }
+
     public Vector2 ChipPixelCenter => State == null
         ? Vector2.Zero
         : new Vector2(
