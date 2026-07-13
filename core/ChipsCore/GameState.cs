@@ -34,8 +34,7 @@ public sealed class GameState
     private readonly Dictionary<int, Actor> _monsterAt = new();
     private readonly List<(int Button, int Target)> _trapWiring = new();
     private readonly List<(int Button, int Target)> _cloneWiring = new();
-    private readonly Random _rng;
-    private bool _monsterParity = true; // flipped at the start of each tick
+    private TwPrng _rng;
     private bool _iceBounceFailed;
 
     private readonly Dictionary<Tile, int> _keys = new()
@@ -70,14 +69,19 @@ public sealed class GameState
 
     public IReadOnlyList<Actor> Monsters => _monsters;
 
+    /// <summary>Reset the PRNG to a recorded seed (solution replay).</summary>
+    public void SeedRng(uint seed) => _rng = new TwPrng(seed);
+
     public GameState()
     {
-        _rng = new Random(0);
+        _rng = new TwPrng(0);
     }
 
     public GameState(LevelData level)
     {
-        _rng = new Random(level.Number);
+        _rng = new TwPrng((uint)(level.Number * 2887 + 1));
+
+        // (replays call SeedRng afterwards with the recorded seed)
 
         // Terrain comes from the top layer except where an actor (Chip,
         // monster, block) stands — the terrain under an actor is in the
@@ -414,39 +418,59 @@ public sealed class GameState
 
     // ---------------------------------------------------------------- monsters
 
-    /// <summary>Advance every active monster one step, in monster-list
-    /// order. Teeth and blobs move on alternate ticks. Returns Died when a
-    /// monster reaches Chip.</summary>
+    /// <summary>Phase offset for teeth/blob half-speed ticks (settable so
+    /// replays can align with the recording; 0 or 1).</summary>
+    public int TeethOffset { get; set; }
+
+    private int _monsterTickCount;
+
+    /// <summary>Advance every active, non-sliding monster one step, in
+    /// monster-list order. Teeth and blobs move on alternate ticks.
+    /// Sliding monsters are advanced by MonstersSlideTick instead (slips
+    /// run at double speed in MS). Returns Died when a monster reaches
+    /// Chip.</summary>
     public MoveResult MonsterTick()
     {
         if (Won || IsDead) return MoveResult.Blocked;
 
-        _monsterParity = !_monsterParity;
+        var halfSpeedRests = (_monsterTickCount + TeethOffset) % 2 == 1;
+        _monsterTickCount++;
         foreach (var m in _monsters.ToList())
         {
             if (m.Dead || !m.Active) continue;
-            if (m.Type is ActorType.Teeth or ActorType.Blob && _monsterParity) continue;
+            if (m.SlideDir != Direction.None) continue;
+            if (m.Type is ActorType.Teeth or ActorType.Blob && halfSpeedRests) continue;
             if (GetTile(m.X, m.Y) == Tile.Trap && !IsTrapOpen(m.Y * Width + m.X)) continue;
 
-            if (m.SlideDir != Direction.None)
+            foreach (var dir in ChooseDirections(m))
             {
-                if (!TryActorStep(m, m.SlideDir))
-                {
-                    if (IsIce(GetTile(m.X, m.Y)))
-                    {
-                        m.SlideDir = Opposite(m.SlideDir);
-                        if (!TryActorStep(m, m.SlideDir)) m.SlideDir = Direction.None;
-                    }
-                    // force floors keep pressing, like Chip
-                }
+                if (TryActorStep(m, dir)) break;
+                if (m.Type == ActorType.Tank) break; // tanks wait, never turn
             }
-            else
+
+            if (IsDead) return MoveResult.Died;
+        }
+        return MoveResult.Moved;
+    }
+
+    /// <summary>Advance every sliding monster one tile — called on the
+    /// slide clock (2x the walk rate), matching MS slip speed.</summary>
+    public MoveResult MonstersSlideTick()
+    {
+        if (Won || IsDead) return MoveResult.Blocked;
+
+        foreach (var m in _monsters.ToList())
+        {
+            if (m.Dead || !m.Active || m.SlideDir == Direction.None) continue;
+
+            if (!TryActorStep(m, m.SlideDir))
             {
-                foreach (var dir in ChooseDirections(m))
+                if (IsIce(GetTile(m.X, m.Y)))
                 {
-                    if (TryActorStep(m, dir)) break;
-                    if (m.Type == ActorType.Tank) break; // tanks wait, never turn
+                    m.SlideDir = Opposite(m.SlideDir);
+                    if (!TryActorStep(m, m.SlideDir)) m.SlideDir = Direction.None;
                 }
+                // force floors keep pressing, like Chip
             }
 
             if (IsDead) return MoveResult.Died;
@@ -469,11 +493,15 @@ public sealed class GameState
             case ActorType.Ball: return new[] { f, b };
             case ActorType.Tank: return new[] { f };
             case ActorType.Walker:
-                // straight, else a random new heading
-                var others = new[] { l, r, b }.OrderBy(_ => _rng.Next()).ToArray();
-                return new[] { f, others[0], others[1], others[2] };
+                // TW ms: forward, then L/B/R in a PRNG-permuted order
+                var rest = new[] { l, b, r };
+                _rng.Permute3(rest);
+                return new[] { f, rest[0], rest[1], rest[2] };
             case ActorType.Blob:
-                return new[] { (Direction)_rng.Next(1, 5) };
+                // TW ms: all four directions, PRNG-permuted
+                var all = new[] { f, l, b, r };
+                _rng.Permute4(all);
+                return all;
             case ActorType.Teeth:
                 var dx = ChipX - m.X;
                 var dy = ChipY - m.Y;
@@ -598,7 +626,14 @@ public sealed class GameState
                 Tile.ForceS => Direction.Down,
                 Tile.ForceE => Direction.Right,
                 Tile.ForceW => Direction.Left,
-                _ => (Direction)_rng.Next(1, 5), // ForceRandom
+                // ForceRandom: TW ms maps random4's 0..3 to N,W,S,E
+                _ => _rng.Random4() switch
+                {
+                    0 => Direction.Up,
+                    1 => Direction.Left,
+                    2 => Direction.Down,
+                    _ => Direction.Right,
+                },
             };
         return Direction.None;
     }

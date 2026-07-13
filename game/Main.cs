@@ -284,20 +284,13 @@ public partial class Main : Node2D
             if (_awaitingRestart) return;
         }
 
-        // Sliding blocks share the slide clock.
-        if (state is { AnyBlocksSliding: true })
+        // Sliding blocks and sliding monsters run on the slip clock.
+        _blockSlideCooldown -= delta;
+        if (_blockSlideCooldown <= 0)
         {
-            _blockSlideCooldown -= delta;
-            if (_blockSlideCooldown <= 0)
-            {
-                _blockSlideCooldown += SlideDelay;
-                HandleResult(_board.SlideBlocks());
-                if (_awaitingRestart) return;
-            }
-        }
-        else
-        {
-            _blockSlideCooldown = 0;
+            _blockSlideCooldown += SlideDelay;
+            HandleResult(_board.SlipTick());
+            if (_awaitingRestart) return;
         }
 
         var held = KeyboardDirection();

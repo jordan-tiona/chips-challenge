@@ -46,10 +46,16 @@ public partial class Board : Node2D
         return result;
     }
 
-    public MoveResult SlideBlocks()
+    /// <summary>One beat of the slip clock: sliding blocks and sliding
+    /// monsters advance (2x walk speed, per MS).</summary>
+    public MoveResult SlipTick()
     {
         if (State == null) return MoveResult.Blocked;
-        var result = State.SlideBlocks();
+        var result = MoveResult.Moved;
+        if (State.AnyBlocksSliding && State.SlideBlocks() == MoveResult.Died)
+            result = MoveResult.Died;
+        if (State.MonstersSlideTick() == MoveResult.Died)
+            result = MoveResult.Died;
         QueueRedraw();
         return result;
     }

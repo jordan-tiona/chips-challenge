@@ -142,12 +142,15 @@ play. A purist "classic view" lock can be an option later.
 
 ## 9. Testing strategy
 
-- **Replay validation:** Tile World's `.tws` solution files record
-  complete input sequences for known levels. Feed a replay into the
-  engine; the level must end in a win with the exact expected tick count.
-  Public TWS sets exist for all CCLP packs — this gives us thousands of
-  free end-to-end tests of ruleset fidelity. Runs as plain xUnit tests
-  (`dotnet test`) since the engine has no Godot dependency.
+- **Replay validation (live since M4):** Tile World's `.tws` solution
+  files record complete input sequences for known levels. Feed a replay
+  into the engine; the level must end in a win. Public TWS sets exist for
+  all CCLP packs. Runs as plain xUnit tests (`dotnet test`); the current
+  pass count is enforced as a floor in `Cclp1ReplayTests` and the failure
+  inventory lives in FIDELITY.md. Raising the floor toward 149/149 is the
+  ongoing fidelity grind: each remaining failure is a documented MS
+  behavior we haven't reproduced yet (boosting, slip-list ordering,
+  alternating force-floor overrides — see FIDELITY.md).
 - Unit tests per tile interaction in `core/` (xUnit).
 - Golden-image tests for the renderer are overkill; eyeball it.
 
