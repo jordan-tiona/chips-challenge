@@ -63,9 +63,11 @@ public partial class TouchIndicator : Control
                 ? (delta.X > 0 ? ChipsCore.Direction.Right : ChipsCore.Direction.Left)
                 : (delta.Y > 0 ? ChipsCore.Direction.Down : ChipsCore.Direction.Up);
 
-        var dim = new Color(1f, 1f, 1f, 0.18f);
-        var gold = new Color("ffd75e", 0.9f);
-        var orange = new Color("ff8850", 0.95f);
+        // Sized for peripheral vision: the player watches the board, not
+        // their thumb, so idle arcs are solid and active arcs are fat.
+        var dim = new Color(1f, 1f, 1f, 0.28f);
+        var gold = new Color("ffd75e", 0.95f);
+        var orange = new Color("ff8850", 1f);
 
         foreach (var (quadDir, angle) in Quadrants)
         {
@@ -74,13 +76,13 @@ public partial class TouchIndicator : Control
             var active = quadDir == dir;
 
             DrawArc(anchor, StepRadius, from, to, 16,
-                active ? gold : dim, active ? 3.5f : 2f, antialiased: true);
+                active ? gold : dim, active ? 10f : 5f, antialiased: true);
             DrawArc(anchor, RunRadius, from, to, 20,
-                active && running ? orange : dim, active && running ? 3.5f : 2f, antialiased: true);
+                active && running ? orange : dim, active && running ? 10f : 5f, antialiased: true);
         }
 
         if (reach > 4f)
-            DrawLine(anchor, _finger, new Color(1f, 1f, 1f, 0.25f), 2f, antialiased: true);
-        DrawCircle(_finger, 7f, new Color(1f, 1f, 1f, running ? 0.9f : 0.6f));
+            DrawLine(anchor, _finger, new Color(1f, 1f, 1f, 0.3f), 3f, antialiased: true);
+        DrawCircle(_finger, 9f, new Color(1f, 1f, 1f, running ? 0.9f : 0.6f));
     }
 }
