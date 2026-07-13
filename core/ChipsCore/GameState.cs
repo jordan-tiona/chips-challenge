@@ -27,7 +27,9 @@ public sealed class GameState
     public const int Height = 32;
 
     private readonly Tile[] _tiles = new Tile[Width * Height];
-    private readonly Dictionary<int, Direction> _blocks = new(); // pos -> facing (clone blocks)
+    private sealed class Block { public int Id; public Direction Facing; }
+    private int _nextBlockId;
+    private readonly Dictionary<int, Block> _blocks = new(); // pos -> block entity
     private readonly Dictionary<int, Direction> _slidingBlocks = new(); // pos -> slide dir
     private readonly List<int> _teleports = new();
     private readonly List<Actor> _monsters = new();
@@ -94,7 +96,7 @@ public sealed class GameState
                 var facing = top is >= 0x0E and <= 0x11
                     ? (Direction)((top - 0x0E) switch { 0 => 1, 1 => 2, 2 => 3, _ => 4 })
                     : Direction.None;
-                _blocks[i] = facing;
+                _blocks[i] = new Block { Id = _nextBlockId++, Facing = facing };
             }
             else if (TileCodes.IsMonster(top))
             {
@@ -147,6 +149,10 @@ public sealed class GameState
     }
 
     public bool HasBlockAt(int x, int y) => InBounds(x, y) && _blocks.ContainsKey(y * Width + x);
+
+    /// <summary>Blocks with stable identities, for renderer interpolation.</summary>
+    public IEnumerable<(int Id, int X, int Y)> BlockPositions =>
+        _blocks.Select(kv => (kv.Value.Id, kv.Key % Width, kv.Key / Width));
 
     public int GetKeyCount(Tile key) => _keys.GetValueOrDefault(key);
 
@@ -417,16 +423,16 @@ public sealed class GameState
             return;
         }
 
-        if (_blocks.TryGetValue(machineIdx, out var facing) && facing != Direction.None)
+        if (_blocks.TryGetValue(machineIdx, out var blk) && blk.Facing != Direction.None)
         {
-            var (dx, dy) = facing.Delta();
+            var (dx, dy) = blk.Facing.Delta();
             var toX = mx + dx;
             var toY = my + dy;
-            if (CanCross(mx, my, facing) && !HasBlockAt(toX, toY)
+            if (CanCross(mx, my, blk.Facing) && !HasBlockAt(toX, toY)
                 && !_monsterAt.ContainsKey(toY * Width + toX)
                 && BlockCanRest(GetTile(toX, toY)))
             {
-                SettleBlock(toX, toY, facing, facing);
+                SettleBlock(toX, toY, new Block { Id = _nextBlockId++, Facing = blk.Facing }, blk.Facing);
             }
         }
     }
@@ -751,15 +757,16 @@ public sealed class GameState
         if (_monsterAt.TryGetValue(destY * Width + destX, out var m) && !m.Dead) return false;
         if (!BlockCanRest(GetTile(destX, destY))) return false;
 
+        var pushed = _blocks[blockIdx];
         _blocks.Remove(blockIdx);
         _slidingBlocks.Remove(blockIdx);
-        SettleBlock(destX, destY, Direction.None, dir);
+        SettleBlock(destX, destY, pushed, dir);
         return true;
     }
 
     /// <summary>Land a block on a tile, resolving water/bombs/buttons and
     /// starting a slide if it arrived on ice or a force floor.</summary>
-    private void SettleBlock(int x, int y, Direction facing, Direction arrival)
+    private void SettleBlock(int x, int y, Block block, Direction arrival)
     {
         var idx = y * Width + x;
         switch (GetTile(x, y))
@@ -771,11 +778,11 @@ public sealed class GameState
                 SetTile(x, y, Tile.Floor); // both destroyed
                 return;
             case Tile.ButtonGreen or Tile.ButtonRed or Tile.ButtonBlue or Tile.ButtonBrown:
-                _blocks[idx] = facing;
+                _blocks[idx] = block;
                 PressButton(idx);
                 break;
             default:
-                _blocks[idx] = facing;
+                _blocks[idx] = block;
                 break;
         }
 

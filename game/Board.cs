@@ -1,3 +1,5 @@
+using System.Collections.Generic;
+using System.Linq;
 using ChipsCore;
 using Godot;
 
@@ -16,10 +18,53 @@ public partial class Board : Node2D
 
     private readonly Font _font = ThemeDB.FallbackFont;
 
+    // Visual positions chase the true grid positions each frame so motion
+    // glides while the engine stays perfectly discrete. Speed is fast
+    // enough to arrive well within one step window; jumps of more than
+    // 1.5 tiles (teleports, level loads) snap instantly.
+    private const float ChaseSpeed = TileSize * 14f; // px/second
+    private const float SnapDistance = TileSize * 1.5f;
+    private Vector2 _chipVisual;
+    private readonly Dictionary<Actor, Vector2> _monsterVisual = new();
+    private readonly Dictionary<int, Vector2> _blockVisual = new();
+
     public void LoadLevel(LevelData level)
     {
         State = new GameState(level);
+        _monsterVisual.Clear();
+        _blockVisual.Clear();
+        _chipVisual = ChipPixelCenter;
         QueueRedraw();
+    }
+
+    public override void _Process(double delta)
+    {
+        if (State == null) return;
+
+        _chipVisual = Chase(_chipVisual, ChipPixelCenter, (float)delta);
+        foreach (var m in State.Monsters)
+        {
+            if (m.Dead) { _monsterVisual.Remove(m); continue; }
+            var target = new Vector2(m.X * TileSize + TileSize / 2f, m.Y * TileSize + TileSize / 2f);
+            _monsterVisual[m] = Chase(_monsterVisual.GetValueOrDefault(m, target), target, (float)delta);
+        }
+        var seen = new HashSet<int>();
+        foreach (var (id, x, y) in State.BlockPositions)
+        {
+            seen.Add(id);
+            var target = new Vector2(x * TileSize, y * TileSize);
+            _blockVisual[id] = Chase(_blockVisual.GetValueOrDefault(id, target), target, (float)delta);
+        }
+        foreach (var gone in _blockVisual.Keys.Where(k => !seen.Contains(k)).ToList())
+            _blockVisual.Remove(gone);
+
+        QueueRedraw();
+    }
+
+    private static Vector2 Chase(Vector2 current, Vector2 target, float delta)
+    {
+        if (current.DistanceTo(target) > SnapDistance) return target;
+        return current.MoveToward(target, ChaseSpeed * delta);
     }
 
     /// <summary>One tick of the engine (20/second); everything — Chip's
@@ -60,15 +105,15 @@ public partial class Board : Node2D
                         HorizontalAlignment.Center, TileSize, 18, GlyphColor(tile));
 
                 DrawEdgeWalls(origin, tile);
-
-                if (State.HasBlockAt(x, y))
-                {
-                    DrawRect(new Rect2(origin + new Vector2(3, 3), TileSize - 6, TileSize - 6),
-                        new Color("8a6a42"));
-                    DrawRect(new Rect2(origin + new Vector2(3, 3), TileSize - 6, TileSize - 6),
-                        new Color("5a4225"), filled: false, width: 2);
-                }
             }
+        }
+
+        foreach (var pos in _blockVisual.Values)
+        {
+            DrawRect(new Rect2(pos + new Vector2(3, 3), TileSize - 6, TileSize - 6),
+                new Color("8a6a42"));
+            DrawRect(new Rect2(pos + new Vector2(3, 3), TileSize - 6, TileSize - 6),
+                new Color("5a4225"), filled: false, width: 2);
         }
 
         DrawRect(new Rect2(0, 0, GameState.Width * TileSize, GameState.Height * TileSize),
@@ -76,17 +121,16 @@ public partial class Board : Node2D
 
         foreach (var m in State.Monsters)
         {
-            if (m.Dead) continue;
-            var c = new Vector2(m.X * TileSize + TileSize / 2f, m.Y * TileSize + TileSize / 2f);
+            if (m.Dead || !_monsterVisual.TryGetValue(m, out var c)) continue;
             DrawCircle(c, 11, MonsterColor(m.Type));
-            DrawString(_font, new Vector2(m.X * TileSize, m.Y * TileSize + 23),
+            DrawString(_font, new Vector2(c.X - TileSize / 2f, c.Y + 7),
                 MonsterGlyph(m.Type), HorizontalAlignment.Center, TileSize, 16,
                 new Color("14141c"));
         }
 
         // Chip
-        DrawCircle(ChipPixelCenter, 12, new Color("ffd75e"));
-        DrawArc(ChipPixelCenter, 12, 0, Mathf.Tau, 24, new Color("1a1a2e"), 2, antialiased: true);
+        DrawCircle(_chipVisual, 12, new Color("ffd75e"));
+        DrawArc(_chipVisual, 12, 0, Mathf.Tau, 24, new Color("1a1a2e"), 2, antialiased: true);
     }
 
     /// <summary>Thin walls and ice-corner walls drawn as bright edge lines.</summary>
