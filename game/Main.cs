@@ -10,7 +10,8 @@ public partial class Main : Node2D
 {
     private const double TickSeconds = 0.05;   // engine runs at 20 ticks/second
     private const double RepeatGraceSeconds = 0.2; // keyboard: hold this long to run
-    private const float RunThreshold = 132f;   // touch: drag this far to run (no timer)
+    private const float RunThreshold = 132f;   // touch: drag this far to run
+    private const double RunEngageSeconds = 0.08; // ...held past it this long (flick guard)
     private const float SwipeThreshold = 72f;  // px of drag that counts as a swipe
     private const float TapSlop = 32f;         // max px of finger travel for a tap
 
@@ -25,6 +26,7 @@ public partial class Main : Node2D
     private int _pathStall;
     private Direction _heldPrev = Direction.None;
     private double _heldDuration;
+    private double _runDepthTime; // time the drag has stayed past RunThreshold
     private bool _steppedOnce;   // this gesture already produced its single step
 
     private Board _board = null!;
@@ -300,21 +302,26 @@ public partial class Main : Node2D
 
         // Single-step debounce: a fresh gesture yields exactly one step.
         // Keyboard runs after a short hold; touch runs only when the drag
-        // pushes past RunThreshold — distance, not time, so a lingering
-        // finger can never double-step.
+        // stays past RunThreshold for RunEngageSeconds (so a fast flick
+        // crossing the ring in transit doesn't count). Within one touch, a
+        // direction wobble does NOT re-arm the single step — one touch,
+        // one step, unless genuinely running.
         if (held != _heldPrev)
         {
+            var midTouchTurn = keyboard == Direction.None
+                && held != Direction.None && _heldPrev != Direction.None;
             _heldPrev = held;
             _heldDuration = 0;
-            _steppedOnce = false;
+            if (!midTouchTurn) _steppedOnce = false;
         }
         else
         {
             _heldDuration += delta;
         }
+        _runDepthTime = _touchRun ? _runDepthTime + delta : 0;
         var repeating = keyboard != Direction.None
             ? _heldDuration >= RepeatGraceSeconds
-            : _touchRun;
+            : _runDepthTime >= RunEngageSeconds;
 
         // Pump the engine at 20 ticks/second; it does all its own gating
         // (walk speed, slides, monsters, boosting).
