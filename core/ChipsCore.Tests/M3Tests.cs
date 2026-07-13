@@ -248,6 +248,27 @@ public class M3Tests
     }
 
     [Fact]
+    public void Clone_Machine_Fires_Repeatedly()
+    {
+        // Graduation (CCLP1 #10): a glider machine sweeps a bomb column,
+        // one bomb per button press. The template must survive each spawn.
+        var s = NewState(
+            new (int, int, byte)[] { (10, 8, 0x50), (10, 7, 0x2A), (10, 5, 0x2A), (6, 5, 0x24) },
+            clones: new[] { (6, 5, 10, 8) },
+            inactive: new[] { (10, 8) }); // north-facing glider on the machine
+        Assert.Equal(MoveResult.Moved, s.TryMove(Direction.Right)); // press 1
+        Assert.Equal(Tile.Floor, s.GetTile(10, 7)); // first bomb gone (kamikaze glider)
+        s.TryMove(Direction.Left);
+        Assert.Equal(MoveResult.Moved, s.TryMove(Direction.Right)); // press 2
+        // second glider spawned, flew north past the cleared tile...
+        var flying = s.Monsters.Where(m => m is { Dead: false, Type: ActorType.Glider }).ToList();
+        Assert.Equal(2, flying.Count); // template + airborne clone
+        for (var i = 0; i < 4; i++) s.MonstersSlideTick(); // (not sliding; just settle)
+        for (var i = 0; i < 4; i++) s.MonsterTick();
+        Assert.Equal(Tile.Floor, s.GetTile(10, 5)); // second bomb swept
+    }
+
+    [Fact]
     public void Gravel_Is_A_Safe_Square()
     {
         // Paramecium marching west straight at Chip, who stands on gravel.

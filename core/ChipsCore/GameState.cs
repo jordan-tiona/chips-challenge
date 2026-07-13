@@ -395,6 +395,10 @@ public sealed class GameState
                 _monsters.Add(clone);
                 if (!clone.Dead) _monsterAt[clone.Y * Width + clone.X] = clone;
             }
+            // The clone briefly shared the machine's cell, and its
+            // departure evicted the template from the occupancy map —
+            // restore it or the machine only ever fires once.
+            _monsterAt[machineIdx] = template;
             return;
         }
 
