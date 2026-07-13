@@ -534,14 +534,18 @@ public sealed class GameState
         if (_blocks.ContainsKey(toIdx)) return false;
         if (_monsterAt.TryGetValue(toIdx, out var other) && !other.Dead) return false;
 
+        // Terrain legality comes FIRST: a monster can only reach Chip on
+        // ground it could enter anyway. This is what makes gravel (and
+        // hint tiles) safe squares. Water/fire aren't blocked — monsters
+        // enter and die there — so they still collide with Chip en route.
         var target = GetTile(toX, toY);
+        if (!MonsterCanEnter(m.Type, target)) return false;
         if (toX == ChipX && toY == ChipY)
         {
             MoveActor(m, toX, toY, dir);
             Die("Look out for creatures!");
             return true;
         }
-        if (!MonsterCanEnter(m.Type, target)) return false;
 
         MoveActor(m, toX, toY, dir);
 
@@ -597,7 +601,7 @@ public sealed class GameState
             if (candidate != entered && _monsterAt.ContainsKey(candidate)) continue;
             if (!CanCross(cx, cy, dir)) continue;
             if (_blocks.ContainsKey(outIdx) || _monsterAt.ContainsKey(outIdx)) continue;
-            if (!MonsterCanEnter(m.Type, _tiles[outIdx]) && !(cx + dx == ChipX && cy + dy == ChipY)) continue;
+            if (!MonsterCanEnter(m.Type, _tiles[outIdx])) continue;
 
             MoveActor(m, cx, cy, dir);
             TryActorStep(m, dir);

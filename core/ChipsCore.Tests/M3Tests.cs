@@ -245,6 +245,37 @@ public class M3Tests
         Assert.Equal(Tile.ToggleOpen, s.GetTile(10, 5));
     }
 
+    [Fact]
+    public void Gravel_Is_A_Safe_Square()
+    {
+        // Paramecium marching west straight at Chip, who stands on gravel.
+        var level = new LevelData();
+        level.TopLayer[5 * 32 + 5] = 0x6E;      // Chip at (5,5)
+        level.BottomLayer[5 * 32 + 5] = 0x2D;   // ...standing on gravel
+        level.TopLayer[5 * 32 + 7] = 0x61;      // paramecium heading west at (7,5)
+        level.MonsterList.Add((7, 5));
+        var s = new GameState(level);
+        for (var i = 0; i < 10; i++)
+            Assert.NotEqual(MoveResult.Died, s.MonsterTick());
+        Assert.False(s.IsDead);
+        Assert.Equal((5, 5), (s.ChipX, s.ChipY));
+    }
+
+    [Fact]
+    public void Swimming_Chip_Is_Not_Safe_From_Monsters()
+    {
+        // Water doesn't BLOCK monsters — they enter it and drown. A
+        // kamikaze fireball still collides with a swimming Chip.
+        var level = new LevelData();
+        level.TopLayer[5 * 32 + 5] = 0x6E;      // Chip at (5,5)
+        level.BottomLayer[5 * 32 + 5] = 0x03;   // ...in water
+        level.TopLayer[5 * 32 + 7] = 0x45;      // fireball heading west
+        level.MonsterList.Add((7, 5));
+        var s = new GameState(level);
+        s.MonsterTick();
+        Assert.Equal(MoveResult.Died, s.MonsterTick());
+    }
+
     // ------------------------------------------------------------- pathfinding
 
     [Fact]
