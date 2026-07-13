@@ -19,11 +19,13 @@ public partial class Board : Node2D
     private readonly Font _font = ThemeDB.FallbackFont;
 
     // Visual positions chase the true grid positions each frame so motion
-    // glides while the engine stays perfectly discrete. Speed is fast
-    // enough to arrive well within one step window; jumps of more than
-    // 1.5 tiles (teleports, level loads) snap instantly.
-    private const float ChaseSpeed = TileSize * 14f; // px/second
-    private const float SnapDistance = TileSize * 1.5f;
+    // glides while the engine stays perfectly discrete. Each entity's
+    // visual speed equals its true movement rate, so consecutive steps
+    // chain into constant velocity (fully continuous motion, up to ~1
+    // tile behind the lethal truth — the Lynx look). Falling further
+    // behind triggers catch-up; jumps beyond 1.6 tiles (teleports) snap.
+    private const float SnapDistance = TileSize * 1.6f;
+    private const float CatchUpDistance = TileSize * 1.15f;
     private Vector2 _chipVisual;
     private readonly Dictionary<Actor, Vector2> _monsterVisual = new();
     private readonly Dictionary<int, Vector2> _blockVisual = new();
@@ -41,19 +43,22 @@ public partial class Board : Node2D
     {
         if (State == null) return;
 
-        _chipVisual = Chase(_chipVisual, ChipPixelCenter, (float)delta);
+        var chipRate = State.SlideDir != Direction.None ? 10f : 5f;
+        _chipVisual = Chase(_chipVisual, ChipPixelCenter, (float)delta, chipRate);
         foreach (var m in State.Monsters)
         {
             if (m.Dead) { _monsterVisual.Remove(m); continue; }
+            var rate = m.SlideDir != Direction.None ? 10f
+                : m.Type is ActorType.Teeth or ActorType.Blob ? 2.5f : 5f;
             var target = new Vector2(m.X * TileSize + TileSize / 2f, m.Y * TileSize + TileSize / 2f);
-            _monsterVisual[m] = Chase(_monsterVisual.GetValueOrDefault(m, target), target, (float)delta);
+            _monsterVisual[m] = Chase(_monsterVisual.GetValueOrDefault(m, target), target, (float)delta, rate);
         }
         var seen = new HashSet<int>();
         foreach (var (id, x, y) in State.BlockPositions)
         {
             seen.Add(id);
             var target = new Vector2(x * TileSize, y * TileSize);
-            _blockVisual[id] = Chase(_blockVisual.GetValueOrDefault(id, target), target, (float)delta);
+            _blockVisual[id] = Chase(_blockVisual.GetValueOrDefault(id, target), target, (float)delta, 10f);
         }
         foreach (var gone in _blockVisual.Keys.Where(k => !seen.Contains(k)).ToList())
             _blockVisual.Remove(gone);
@@ -61,10 +66,16 @@ public partial class Board : Node2D
         QueueRedraw();
     }
 
-    private static Vector2 Chase(Vector2 current, Vector2 target, float delta)
+    /// <summary>Move toward target at the entity's true tiles/second (so
+    /// chained steps read as continuous motion), sprinting to catch up if
+    /// the visual falls more than a step behind.</summary>
+    private static Vector2 Chase(Vector2 current, Vector2 target, float delta, float tilesPerSecond)
     {
-        if (current.DistanceTo(target) > SnapDistance) return target;
-        return current.MoveToward(target, ChaseSpeed * delta);
+        var distance = current.DistanceTo(target);
+        if (distance > SnapDistance) return target;
+        var speed = TileSize * tilesPerSecond * 1.04f;
+        if (distance > CatchUpDistance) speed *= 1.6f;
+        return current.MoveToward(target, speed * delta);
     }
 
     /// <summary>One tick of the engine (20/second); everything — Chip's
