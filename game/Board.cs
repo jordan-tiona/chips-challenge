@@ -48,7 +48,11 @@ public partial class Board : Node2D
             {
                 var tile = State.GetTile(x, y);
                 var origin = new Vector2(x * TileSize, y * TileSize);
-                DrawRect(new Rect2(origin, TileSize, TileSize), Background(tile));
+                // Traps telegraph their state: red = armed, green = held open.
+                var bg = tile == Tile.Trap
+                    ? (State.IsTrapOpenAt(x, y) ? new Color("2e5a38") : new Color("5e3434"))
+                    : Background(tile);
+                DrawRect(new Rect2(origin, TileSize, TileSize), bg);
 
                 var glyph = Glyph(tile);
                 if (glyph.Length > 0)
@@ -156,7 +160,6 @@ public partial class Board : Node2D
         Tile.Hint => new Color("2f4f6f"),
         Tile.Thief => new Color("4e3a5e"),
         Tile.Teleport => new Color("6e2a80"),
-        Tile.Trap => new Color("46424e"),
         Tile.ToggleClosed => new Color("6a4848"),
         Tile.ToggleOpen => new Color("2a2028"),
         Tile.CloneMachine => new Color("6e6e3a"),

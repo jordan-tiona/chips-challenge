@@ -276,8 +276,6 @@ public partial class Main : Node2D
 
         if (held != Direction.None)
             _autoPath = null; // manual input always wins over a tapped path
-        else if (_autoPath is { Count: > 0 } && state.MonsterNear(2))
-            _autoPath = null; // danger close: stop autowalking, ask the human
 
         // Pump the engine at 20 ticks/second; it does all its own gating
         // (walk speed, slides, monsters, boosting).

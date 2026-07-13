@@ -415,6 +415,11 @@ public sealed class GameState
     private bool IsTrapOpen(int trapIdx) => _trapWiring.Any(w =>
         w.Target == trapIdx && IsOccupied(w.Button));
 
+    /// <summary>Whether the trap at (x,y) is currently held open by a
+    /// pressed brown button (renderer shows open/closed jaws).</summary>
+    public bool IsTrapOpenAt(int x, int y) =>
+        GetTile(x, y) == Tile.Trap && IsTrapOpen(y * Width + x);
+
     private bool IsOccupied(int idx) =>
         idx == ChipY * Width + ChipX
         || _blocks.ContainsKey(idx)

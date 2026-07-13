@@ -193,7 +193,9 @@ public class M3Tests
         Assert.Equal((11, 5), (m.X, m.Y)); // walked into the trap
         s.MonsterTick();
         Assert.Equal((11, 5), (m.X, m.Y)); // held
+        Assert.False(s.IsTrapOpenAt(11, 5));
         s.TryMove(Direction.Right);        // Chip stands on the button
+        Assert.True(s.IsTrapOpenAt(11, 5));
         s.MonsterTick();
         Assert.Equal((12, 5), (m.X, m.Y)); // released
     }

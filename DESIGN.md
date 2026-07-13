@@ -127,10 +127,11 @@ Plan is to prototype all three and pick by feel:
 2. **Virtual d-pad** (bottom corner, thumb-reachable). Reliable but eats
    screen space and blocks view of the grid.
 3. **Tap-to-move pathfinding** (the original actually had mouse click-to-
-   move!). Great for open areas, dangerous near hazards — offered as an
-   *addition* alongside swipe. Implemented: BFS over currently-enterable
-   tiles; any swipe/key cancels the path; a blocked step aborts it. Once
-   monsters exist (M3), add safety halts when hazards approach the path.
+   move!). Offered as an *addition* alongside swipe. Implemented: BFS over
+   currently-safe tiles; any swipe/key cancels the path; a blocked step
+   aborts it. Design decision (Jordan): NO safety halts — auto-walk never
+   second-guesses the player, even with monsters closing in. Inform,
+   don't intervene.
 
 Also: pinch-zoom / camera follow, since a 32×32 grid at phone size is too
 small to render all at once. Original showed a 9×9 viewport — we do a
