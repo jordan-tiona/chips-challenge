@@ -124,9 +124,13 @@ public sealed class GameState
         return Step(dir);
     }
 
+    private bool _iceBounceFailed;
+
     /// <summary>One involuntary slide step; the shell calls this on a fast
     /// cadence while SlideDir is set. Hitting a wall on ice bounces Chip
-    /// back the way he came; on a force floor he stays pressed in place.</summary>
+    /// back the way he came (MS rule); blocked in both directions, he
+    /// stops and regains control. On a force floor he stays pressed in
+    /// place.</summary>
     public MoveResult SlideStep()
     {
         if (Won || IsDead || SlideDir == Direction.None) return MoveResult.Blocked;
@@ -135,8 +139,23 @@ public sealed class GameState
         if (result == MoveResult.Blocked)
         {
             if (IsIce(GetTile(ChipX, ChipY)))
-                SlideDir = Opposite(SlideDir);
+            {
+                if (_iceBounceFailed)
+                {
+                    SlideDir = Direction.None; // stuck both ways: stop
+                    _iceBounceFailed = false;
+                }
+                else
+                {
+                    SlideDir = Opposite(SlideDir);
+                    _iceBounceFailed = true;
+                }
+            }
             // on force floors, keep pushing: SlideDir stays
+        }
+        else
+        {
+            _iceBounceFailed = false;
         }
         return result;
     }

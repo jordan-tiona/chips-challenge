@@ -50,6 +50,26 @@ public class M2Tests
     }
 
     [Fact]
+    public void Ice_Blocked_Both_Ways_Stops_And_Returns_Control()
+    {
+        // Chip starts on a popup wall that seals behind him; the ice pocket
+        // below is walled. Bounce fails both ways -> control returns.
+        var level = new LevelData();
+        level.TopLayer[5 * 32 + 6] = 0x6E;      // Chip at (6,5)
+        level.BottomLayer[5 * 32 + 6] = 0x2E;   // ...standing on a popup wall
+        level.TopLayer[6 * 32 + 6] = 0x0C;      // ice below
+        level.TopLayer[7 * 32 + 6] = 0x01;      // wall below the ice
+        var s = new GameState(level);
+
+        Assert.Equal(MoveResult.Moved, s.TryMove(Direction.Down));
+        Assert.Equal(Tile.Wall, s.GetTile(6, 5)); // popup sealed behind
+        Assert.Equal(MoveResult.Blocked, s.SlideStep()); // wall below; bounce up
+        Assert.Equal(MoveResult.Blocked, s.SlideStep()); // sealed above; stop
+        Assert.Equal(Direction.None, s.SlideDir);
+        Assert.Equal(MoveResult.Moved, s.TryMove(Direction.Left)); // control is back
+    }
+
+    [Fact]
     public void Skates_Prevent_Sliding()
     {
         var s = NewState((4, 5, 0x6A), (6, 5, 0x0C));

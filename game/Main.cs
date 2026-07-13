@@ -72,15 +72,28 @@ public partial class Main : Node2D
         LoadLevel(0);
     }
 
+    private MarginContainer _safeArea = null!;
+
     private void BuildHud()
     {
         var hud = new CanvasLayer();
         AddChild(hud);
 
+        // The whole HUD lives inside the display's safe area so notches,
+        // camera cutouts, rounded corners, and the gesture bar never clip
+        // it. Both wrappers must ignore mouse or they'd eat board touches.
+        _safeArea = new MarginContainer { MouseFilter = Control.MouseFilterEnum.Ignore };
+        _safeArea.SetAnchorsPreset(Control.LayoutPreset.FullRect);
+        hud.AddChild(_safeArea);
+        var root = new Control { MouseFilter = Control.MouseFilterEnum.Ignore };
+        _safeArea.AddChild(root);
+        GetTree().Root.SizeChanged += ApplySafeAreaMargins;
+        ApplySafeAreaMargins();
+
         // ---- top bar: prev | title + chips | next ----
         var topBar = new PanelContainer();
         topBar.SetAnchorsPreset(Control.LayoutPreset.TopWide);
-        hud.AddChild(topBar);
+        root.AddChild(topBar);
 
         var row = new HBoxContainer();
         row.AddThemeConstantOverride("separation", 12);
@@ -116,11 +129,9 @@ public partial class Main : Node2D
             GrowVertical = Control.GrowDirection.Begin,
         };
         _hintPanel.SetAnchorsPreset(Control.LayoutPreset.BottomWide);
-        // Float above the bottom edge: immersive mode draws under rounded
-        // screen corners and the gesture bar, which clip flush content.
         _hintPanel.OffsetLeft = 24;
         _hintPanel.OffsetRight = -24;
-        _hintPanel.OffsetBottom = -56;
+        _hintPanel.OffsetBottom = -16;
         _hintLabel = new Label
         {
             HorizontalAlignment = HorizontalAlignment.Center,
@@ -128,18 +139,38 @@ public partial class Main : Node2D
         };
         _hintLabel.AddThemeFontSizeOverride("font_size", 22);
         _hintPanel.AddChild(_hintLabel);
-        hud.AddChild(_hintPanel);
+        root.AddChild(_hintPanel);
 
-        // ---- level-complete banner ----
+        // ---- level-complete / death banner ----
         var center = new CenterContainer();
         center.SetAnchorsPreset(Control.LayoutPreset.FullRect);
         center.MouseFilter = Control.MouseFilterEnum.Ignore;
-        hud.AddChild(center);
+        root.AddChild(center);
         _banner = new PanelContainer { Visible = false };
         _bannerLabel = new Label();
         _bannerLabel.AddThemeFontSizeOverride("font_size", 40);
         _banner.AddChild(_bannerLabel);
         center.AddChild(_banner);
+    }
+
+    /// <summary>Convert the OS-reported safe area (physical px) into canvas
+    /// units and apply it as HUD margins. Rerun on window resize/rotation.</summary>
+    private void ApplySafeAreaMargins()
+    {
+        var win = DisplayServer.WindowGetSize();
+        var safe = DisplayServer.GetDisplaySafeArea();
+        var canvas = GetViewport().GetVisibleRect().Size;
+        if (win.X <= 0 || win.Y <= 0 || canvas.X <= 0) return;
+        var scale = win.X / canvas.X;
+
+        _safeArea.AddThemeConstantOverride("margin_left",
+            Mathf.RoundToInt(safe.Position.X / scale));
+        _safeArea.AddThemeConstantOverride("margin_top",
+            Mathf.RoundToInt(safe.Position.Y / scale));
+        _safeArea.AddThemeConstantOverride("margin_right",
+            Mathf.RoundToInt((win.X - safe.Position.X - safe.Size.X) / scale));
+        _safeArea.AddThemeConstantOverride("margin_bottom",
+            Mathf.RoundToInt((win.Y - safe.Position.Y - safe.Size.Y) / scale));
     }
 
     private static Button MakeNavButton(string text)
