@@ -10,9 +10,9 @@ public partial class Main : Node2D
 {
     private const double TickSeconds = 0.05;   // engine runs at 20 ticks/second
     private const double RepeatGraceSeconds = 0.2; // keyboard: hold this long to run
-    private const float RunThreshold = 88f;    // touch: drag this far to run (no timer)
-    private const float SwipeThreshold = 48f;  // px of drag that counts as a swipe
-    private const float TapSlop = 24f;         // max px of finger travel for a tap
+    private const float RunThreshold = 132f;   // touch: drag this far to run (no timer)
+    private const float SwipeThreshold = 72f;  // px of drag that counts as a swipe
+    private const float TapSlop = 32f;         // max px of finger travel for a tap
 
     private List<LevelData> _levels = new();
     private int _levelIndex;
