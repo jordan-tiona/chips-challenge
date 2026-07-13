@@ -162,14 +162,18 @@ public sealed class GameState
     // ---------------------------------------------------------------- Chip moves
 
     /// <summary>Player-initiated move. While sliding on ice there is no
-    /// control; force floors can be overridden in any direction (MS allows
-    /// this on alternating ticks; M4 refines the timing).</summary>
+    /// control; on force floors any direction may be overridden EXCEPT the
+    /// slide's own direction, which MS discards (TW choosechipmove).</summary>
     public MoveResult TryMove(Direction dir)
     {
         if (Won || IsDead || dir == Direction.None) return MoveResult.Blocked;
 
-        if (SlideDir != Direction.None && IsIce(GetTile(ChipX, ChipY)))
-            return MoveResult.Blocked;
+        if (SlideDir != Direction.None)
+        {
+            var here = GetTile(ChipX, ChipY);
+            if (IsIce(here)) return MoveResult.Blocked;
+            if (IsForce(here) && dir == SlideDir) return MoveResult.Blocked;
+        }
 
         return Step(dir);
     }
@@ -871,6 +875,212 @@ public sealed class GameState
                 => _keys[DoorToKey[t]] > 0,
             _ => true,
         };
+    }
+
+    // ---------------------------------------------------------------- tick engine
+
+    /// <summary>Ticks elapsed; 20 per second (Tile World's clock).</summary>
+    public int CurrentTick { get; private set; }
+
+    /// <summary>MS stepping parity from the recording (phases teeth/blob
+    /// ticks); 0 in normal play.</summary>
+    public int Stepping { get; set; }
+
+    private bool _chipHasMoved;
+
+    private sealed class SlipEntry
+    {
+        public bool IsChip;
+        public Actor? Monster;
+        public int BlockIdx = -1;
+    }
+
+    private readonly List<SlipEntry> _slipList = new();
+
+    /// <summary>
+    /// One tick of the game, ported from TW mslogic advancegame(): on even
+    /// ticks (after tick 0) non-sliding creatures decide/move (every 4th
+    /// tick; teeth and blobs every 8th, phased by stepping), then the slip
+    /// list processes sliding entities in order (Chip first — he prepends;
+    /// monsters and blocks append). Chip's voluntary move comes last.
+    /// Chip may move every 4 ticks, but slipping clears the gate — that is
+    /// MS "boosting". Force-floor input in the slide direction is
+    /// discarded; ice allows no input at all.
+    /// </summary>
+    public MoveResult Advance(Direction input)
+    {
+        if (Won || IsDead) return MoveResult.Blocked;
+        var t = CurrentTick;
+        CurrentTick++;
+
+        if (t % 4 == 0) _chipHasMoved = false;
+
+        if (t != 0 && t % 2 == 0)
+        {
+            if (t % 4 == 0)
+            {
+                MonsterDecisions(t);
+                if (IsDead) return MoveResult.Died;
+            }
+            ProcessSlips();
+            if (IsDead) return MoveResult.Died;
+            if (Won) return MoveResult.Won;
+        }
+
+        if (input != Direction.None && !_chipHasMoved)
+        {
+            var result = TryMove(input); // handles ice lock + same-dir discard
+            if (result != MoveResult.Blocked) _chipHasMoved = true;
+            if (result is MoveResult.Died or MoveResult.Won) return result;
+        }
+
+        return MoveResult.Moved;
+    }
+
+    /// <summary>Non-sliding creature decisions (TW: every 4th tick).</summary>
+    private void MonsterDecisions(int tick)
+    {
+        foreach (var m in _monsters.ToList())
+        {
+            if (m.Dead || !m.Active || m.SlideDir != Direction.None) continue;
+            if (m.Type is ActorType.Teeth or ActorType.Blob && ((tick + Stepping) & 4) != 0)
+                continue;
+            if (GetTile(m.X, m.Y) == Tile.Trap && !IsTrapOpen(m.Y * Width + m.X)) continue;
+
+            foreach (var dir in ChooseDirections(m))
+            {
+                if (TryActorStep(m, dir)) break;
+                if (m.Type == ActorType.Tank) break;
+            }
+            if (IsDead) return;
+        }
+    }
+
+    /// <summary>TW floormovements(): advance each slip-list entry one tile.
+    /// A blocked slip on ice turns back immediately (corner-aware) and
+    /// retries within the same pass; force floors stay pressed. Chip's
+    /// move gate is cleared by any slip activity (boosting).</summary>
+    private void ProcessSlips()
+    {
+        ReconcileSlipList();
+        foreach (var e in _slipList.ToList())
+        {
+            if (Won || IsDead) return;
+            var dir = SlipDirOf(e);
+            if (dir == Direction.None) continue;
+
+            if (StepSlipEntity(e, dir))
+            {
+                if (e.IsChip) _chipHasMoved = false;
+                continue;
+            }
+
+            var floor = FloorUnder(e);
+            if (IsForce(floor))
+            {
+                if (e.IsChip) _chipHasMoved = false; // pressed, still boosting
+            }
+            else if (IsIce(floor))
+            {
+                var back = RedirectOnIce(floor, Opposite(dir));
+                SetSlipDir(e, back);
+                if (StepSlipEntity(e, back))
+                {
+                    if (e.IsChip) _chipHasMoved = false;
+                }
+                else if (e.IsChip)
+                {
+                    // Deviation from TW (which leaves Chip stuck): blocked
+                    // both ways returns control, so live play can't softlock.
+                    SlideDir = Direction.None;
+                }
+            }
+        }
+        ReconcileSlipList();
+    }
+
+    /// <summary>Keep the slip list matching who is actually sliding: drop
+    /// stale entries, prepend Chip, append new monsters/blocks.</summary>
+    private void ReconcileSlipList()
+    {
+        _slipList.RemoveAll(e =>
+            (e.IsChip && SlideDir == Direction.None)
+            || (e.Monster is { } m && (m.Dead || m.SlideDir == Direction.None))
+            || (e.BlockIdx >= 0 && !_slidingBlocks.ContainsKey(e.BlockIdx)));
+
+        if (SlideDir != Direction.None && !_slipList.Any(e => e.IsChip))
+            _slipList.Insert(0, new SlipEntry { IsChip = true });
+        foreach (var m in _monsters)
+        {
+            if (!m.Dead && m.Active && m.SlideDir != Direction.None
+                && !_slipList.Any(e => e.Monster == m))
+                _slipList.Add(new SlipEntry { Monster = m });
+        }
+        foreach (var idx in _slidingBlocks.Keys)
+        {
+            if (!_slipList.Any(e => e.BlockIdx == idx))
+                _slipList.Add(new SlipEntry { BlockIdx = idx });
+        }
+    }
+
+    private Direction SlipDirOf(SlipEntry e) =>
+        e.IsChip ? SlideDir
+        : e.Monster is { } m ? (m.Dead ? Direction.None : m.SlideDir)
+        : _slidingBlocks.GetValueOrDefault(e.BlockIdx);
+
+    private void SetSlipDir(SlipEntry e, Direction dir)
+    {
+        if (e.IsChip) SlideDir = dir;
+        else if (e.Monster is { } m) m.SlideDir = dir;
+        else if (_slidingBlocks.ContainsKey(e.BlockIdx)) _slidingBlocks[e.BlockIdx] = dir;
+    }
+
+    private Tile FloorUnder(SlipEntry e) =>
+        e.IsChip ? GetTile(ChipX, ChipY)
+        : e.Monster is { } m ? GetTile(m.X, m.Y)
+        : _tiles[e.BlockIdx];
+
+    private bool StepSlipEntity(SlipEntry e, Direction dir)
+    {
+        if (e.IsChip)
+            return Step(dir) != MoveResult.Blocked;
+        if (e.Monster is { } m)
+            return TryActorStep(m, dir);
+        return SlideOneBlock(e, dir);
+    }
+
+    /// <summary>Advance one sliding block one tile; updates the entry's
+    /// index. Returns false if the way is blocked.</summary>
+    private bool SlideOneBlock(SlipEntry e, Direction dir)
+    {
+        var idx = e.BlockIdx;
+        if (!_blocks.ContainsKey(idx)) return false;
+        var x = idx % Width;
+        var y = idx / Width;
+        var (dx, dy) = dir.Delta();
+        var toX = x + dx;
+        var toY = y + dy;
+        var toIdx = toY * Width + toX;
+
+        if (!CanCross(x, y, dir)) return false;
+        if (_blocks.ContainsKey(toIdx)) return false;
+        if (_monsterAt.TryGetValue(toIdx, out var m) && !m.Dead) return false;
+        var isChipTile = toX == ChipX && toY == ChipY;
+        if (!isChipTile && !BlockCanRest(GetTile(toX, toY))) return false;
+
+        var facing = _blocks[idx];
+        _blocks.Remove(idx);
+        _slidingBlocks.Remove(idx);
+        if (isChipTile)
+        {
+            _blocks[toIdx] = facing;
+            e.BlockIdx = toIdx;
+            Die("Watch out for sliding blocks!");
+            return true;
+        }
+        SettleBlock(toX, toY, facing, dir);
+        e.BlockIdx = toIdx;
+        return true;
     }
 
     // ---------------------------------------------------------------- helpers

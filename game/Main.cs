@@ -8,9 +8,7 @@ namespace ChipsChallenge;
 
 public partial class Main : Node2D
 {
-    private const double RepeatDelay = 0.2;    // MS: Chip walks 5 tiles/second
-    private const double SlideDelay = 0.1;     // sliding is 2x walking speed (MS)
-    private const double MonsterDelay = 0.2;   // monsters move 5 tiles/second
+    private const double TickSeconds = 0.05;   // engine runs at 20 ticks/second
     private const float SwipeThreshold = 48f;  // px of drag that counts as a swipe
     private const float TapSlop = 24f;         // max px of finger travel for a tap
 
@@ -21,9 +19,8 @@ public partial class Main : Node2D
     private bool _awaitingRestart;   // dead or timed out; any input restarts
     private double _timeLeft;        // seconds; <= 0 while untimed
     private int _shownSeconds = -1;
-    private double _slideCooldown;
-    private double _monsterCooldown;
-    private double _blockSlideCooldown;
+    private double _tickAccum;
+    private int _pathStall;
 
     private Board _board = null!;
     private Camera2D _camera = null!;
@@ -38,8 +35,6 @@ public partial class Main : Node2D
     private const float MinZoom = 0.7f;   // whole 32x32 map fits on screen
     private const float MaxZoom = 3f;
 
-    private Direction _lastHeld = Direction.None;
-    private double _cooldown;
     private Vector2? _touchAnchor;
     private Direction _touchDir = Direction.None;
     private Queue<Direction>? _autoPath;  // tap-to-move plan being executed
@@ -200,8 +195,8 @@ public partial class Main : Node2D
         _awaitingRestart = false;
         _timeLeft = level.TimeLimit;
         _shownSeconds = -1;
-        _slideCooldown = 0;
-        _monsterCooldown = MonsterDelay; // beat of grace before monsters move
+        _tickAccum = 0;
+        _pathStall = 0;
         _autoPath = null;
         _touches.Clear();
         _pinching = false;
@@ -274,108 +269,53 @@ public partial class Main : Node2D
         }
 
         var state = _board.State;
-
-        // Monsters move on their own clock, input or not.
-        _monsterCooldown -= delta;
-        if (_monsterCooldown <= 0)
-        {
-            _monsterCooldown += MonsterDelay;
-            HandleResult(_board.MonsterTick());
-            if (_awaitingRestart) return;
-        }
-
-        // Sliding blocks and sliding monsters run on the slip clock.
-        _blockSlideCooldown -= delta;
-        if (_blockSlideCooldown <= 0)
-        {
-            _blockSlideCooldown += SlideDelay;
-            HandleResult(_board.SlipTick());
-            if (_awaitingRestart) return;
-        }
+        if (state == null) return;
 
         var held = KeyboardDirection();
         if (held == Direction.None) held = _touchDir;
 
-        // Involuntary sliding (ice, force floors) runs on its own faster
-        // cadence. Player input is still consulted first so force-floor
-        // overrides work; the engine rejects anything illegal.
-        if (state is { SlideDir: not Direction.None })
-        {
-            _autoPath = null;
-            // Held input keeps trying to override on the normal walk
-            // cadence (fighting a force floor needs repeated overrides);
-            // the engine ignores it on ice.
-            if (held != Direction.None)
-            {
-                _cooldown -= delta;
-                if (held != _lastHeld || _cooldown <= 0)
-                {
-                    _lastHeld = held;
-                    _cooldown = RepeatDelay;
-                    if (DoMove(held) != MoveResult.Blocked)
-                        return; // successful override; slide state recomputed
-                }
-            }
-            else
-            {
-                _lastHeld = Direction.None;
-            }
-
-            _slideCooldown -= delta;
-            if (_slideCooldown <= 0)
-            {
-                _slideCooldown += SlideDelay;
-                HandleResult(_board.SlideStep());
-                RefreshHud();
-            }
-            return;
-        }
-        _slideCooldown = 0;
-
         if (held != Direction.None)
-        {
             _autoPath = null; // manual input always wins over a tapped path
-            if (held != _lastHeld)
+        else if (_autoPath is { Count: > 0 } && state.MonsterNear(2))
+            _autoPath = null; // danger close: stop autowalking, ask the human
+
+        // Pump the engine at 20 ticks/second; it does all its own gating
+        // (walk speed, slides, monsters, boosting).
+        _tickAccum += delta;
+        var ticked = false;
+        while (_tickAccum >= TickSeconds)
+        {
+            _tickAccum -= TickSeconds;
+            ticked = true;
+
+            var input = held;
+            var pathMove = false;
+            if (input == Direction.None && _autoPath is { Count: > 0 })
             {
-                _lastHeld = held;
-                _cooldown = RepeatDelay;
-                DoMove(held);
+                input = _autoPath.Peek();
+                pathMove = true;
             }
-            else
+            if (input != Direction.None) ResumeFollow();
+
+            var before = (state.ChipX, state.ChipY);
+            HandleResult(_board.Advance(input));
+            if (_awaitingRestart || _inputLocked) return;
+
+            if (pathMove && _autoPath != null)
             {
-                _cooldown -= delta;
-                if (_cooldown <= 0)
+                if ((state.ChipX, state.ChipY) != before)
                 {
-                    _cooldown += RepeatDelay;
-                    DoMove(held);
+                    _autoPath.Dequeue();
+                    _pathStall = 0;
+                }
+                else if (++_pathStall > 12)
+                {
+                    _autoPath = null; // world disagreed with the plan; stop
+                    _pathStall = 0;
                 }
             }
-            return;
         }
-
-        _lastHeld = Direction.None;
-
-        if (_autoPath is { Count: > 0 })
-        {
-            if (state != null && state.MonsterNear(2))
-            {
-                _autoPath = null; // danger close: stop autowalking, ask the human
-            }
-            else
-            {
-                _cooldown -= delta;
-                if (_cooldown <= 0)
-                {
-                    _cooldown += RepeatDelay;
-                    if (DoMove(_autoPath.Dequeue()) == MoveResult.Blocked)
-                        _autoPath = null; // world disagreed with the plan; stop
-                }
-            }
-        }
-        else
-        {
-            _cooldown = 0;
-        }
+        if (ticked) RefreshHud();
     }
 
     private static Direction KeyboardDirection()
@@ -498,17 +438,8 @@ public partial class Main : Node2D
         if (path is { Count: > 0 })
         {
             _autoPath = new Queue<Direction>(path);
-            _cooldown = 0; // first step immediately
+            _pathStall = 0;
         }
-    }
-
-    private MoveResult DoMove(Direction dir)
-    {
-        ResumeFollow();
-        var result = _board.TryMove(dir);
-        RefreshHud();
-        HandleResult(result);
-        return result;
     }
 
     private void HandleResult(MoveResult result)
@@ -541,6 +472,5 @@ public partial class Main : Node2D
         _touchDir = Direction.None;
         _touchAnchor = null;
         _autoPath = null;
-        _lastHeld = Direction.None;
     }
 }

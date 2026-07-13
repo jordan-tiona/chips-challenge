@@ -22,40 +22,12 @@ public partial class Board : Node2D
         QueueRedraw();
     }
 
-    public MoveResult TryMove(Direction dir)
+    /// <summary>One tick of the engine (20/second); everything — Chip's
+    /// input, monsters, slides — advances inside GameState.Advance.</summary>
+    public MoveResult Advance(Direction input)
     {
         if (State == null) return MoveResult.Blocked;
-        var result = State.TryMove(dir);
-        QueueRedraw(); // even a blocked bump can change the map (fake walls)
-        return result;
-    }
-
-    public MoveResult SlideStep()
-    {
-        if (State == null) return MoveResult.Blocked;
-        var result = State.SlideStep();
-        QueueRedraw();
-        return result;
-    }
-
-    public MoveResult MonsterTick()
-    {
-        if (State == null) return MoveResult.Blocked;
-        var result = State.MonsterTick();
-        QueueRedraw();
-        return result;
-    }
-
-    /// <summary>One beat of the slip clock: sliding blocks and sliding
-    /// monsters advance (2x walk speed, per MS).</summary>
-    public MoveResult SlipTick()
-    {
-        if (State == null) return MoveResult.Blocked;
-        var result = MoveResult.Moved;
-        if (State.AnyBlocksSliding && State.SlideBlocks() == MoveResult.Died)
-            result = MoveResult.Died;
-        if (State.MonstersSlideTick() == MoveResult.Died)
-            result = MoveResult.Died;
+        var result = State.Advance(input);
         QueueRedraw();
         return result;
     }
