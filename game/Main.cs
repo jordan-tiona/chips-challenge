@@ -9,7 +9,8 @@ namespace ChipsChallenge;
 public partial class Main : Node2D
 {
     private const double TickSeconds = 0.05;   // engine runs at 20 ticks/second
-    private const double RepeatGraceSeconds = 0.3; // hold this long before a gesture repeats
+    private const double RepeatGraceSeconds = 0.2; // keyboard: hold this long to run
+    private const float RunThreshold = 88f;    // touch: drag this far to run (no timer)
     private const float SwipeThreshold = 48f;  // px of drag that counts as a swipe
     private const float TapSlop = 24f;         // max px of finger travel for a tap
 
@@ -41,6 +42,7 @@ public partial class Main : Node2D
 
     private Vector2? _touchAnchor;
     private Direction _touchDir = Direction.None;
+    private bool _touchRun;      // drag went deep enough to mean "run"
     private Queue<Direction>? _autoPath;  // tap-to-move plan being executed
 
     private readonly Dictionary<int, Vector2> _touches = new();
@@ -275,14 +277,16 @@ public partial class Main : Node2D
         var state = _board.State;
         if (state == null) return;
 
-        var held = KeyboardDirection();
-        if (held == Direction.None) held = _touchDir;
+        var keyboard = KeyboardDirection();
+        var held = keyboard != Direction.None ? keyboard : _touchDir;
 
         if (held != Direction.None)
             _autoPath = null; // manual input always wins over a tapped path
 
-        // Single-step debounce: a fresh gesture yields exactly one step;
-        // only holding it past the grace period turns into running.
+        // Single-step debounce: a fresh gesture yields exactly one step.
+        // Keyboard runs after a short hold; touch runs only when the drag
+        // pushes past RunThreshold — distance, not time, so a lingering
+        // finger can never double-step.
         if (held != _heldPrev)
         {
             _heldPrev = held;
@@ -293,7 +297,9 @@ public partial class Main : Node2D
         {
             _heldDuration += delta;
         }
-        var repeating = _heldDuration >= RepeatGraceSeconds;
+        var repeating = keyboard != Direction.None
+            ? _heldDuration >= RepeatGraceSeconds
+            : _touchRun;
 
         // Pump the engine at 20 ticks/second; it does all its own gating
         // (walk speed, slides, monsters, boosting).
@@ -385,6 +391,7 @@ public partial class Main : Node2D
                 if (_touches.Count == 0) _pinching = false;
                 _touchAnchor = null;
                 _touchDir = Direction.None;
+                _touchRun = false;
                 break;
 
             case InputEventScreenDrag drag:
@@ -399,6 +406,7 @@ public partial class Main : Node2D
                             : (delta.Y > 0 ? Direction.Down : Direction.Up);
                     else
                         _touchDir = Direction.None;
+                    _touchRun = delta.Length() >= RunThreshold;
                 }
                 if (_touches.ContainsKey(drag.Index))
                     _touches[drag.Index] = drag.Position;
