@@ -38,6 +38,14 @@ public partial class Board : Node2D
         return result;
     }
 
+    public MoveResult MonsterTick()
+    {
+        if (State == null) return MoveResult.Blocked;
+        var result = State.MonsterTick();
+        QueueRedraw();
+        return result;
+    }
+
     public Vector2 ChipPixelCenter => State == null
         ? Vector2.Zero
         : new Vector2(
@@ -76,6 +84,16 @@ public partial class Board : Node2D
         DrawRect(new Rect2(0, 0, GameState.Width * TileSize, GameState.Height * TileSize),
             new Color(1, 1, 1, 0.25f), filled: false, width: 2);
 
+        foreach (var m in State.Monsters)
+        {
+            if (m.Dead) continue;
+            var c = new Vector2(m.X * TileSize + TileSize / 2f, m.Y * TileSize + TileSize / 2f);
+            DrawCircle(c, 11, MonsterColor(m.Type));
+            DrawString(_font, new Vector2(m.X * TileSize, m.Y * TileSize + 23),
+                MonsterGlyph(m.Type), HorizontalAlignment.Center, TileSize, 16,
+                new Color("14141c"));
+        }
+
         // Chip
         DrawCircle(ChipPixelCenter, 12, new Color("ffd75e"));
         DrawArc(ChipPixelCenter, 12, 0, Mathf.Tau, 24, new Color("1a1a2e"), 2, antialiased: true);
@@ -104,6 +122,32 @@ public partial class Board : Node2D
         if (e) DrawLine(o + new Vector2(TileSize, 0), o + new Vector2(TileSize, TileSize), c, w);
         if (west) DrawLine(o, o + new Vector2(0, TileSize), c, w);
     }
+
+    private static Color MonsterColor(ActorType type) => type switch
+    {
+        ActorType.Bug => new Color("70c040"),
+        ActorType.Fireball => new Color("ff8830"),
+        ActorType.Ball => new Color("ff70b0"),
+        ActorType.Tank => new Color("40a0b8"),
+        ActorType.Glider => new Color("c8c8e0"),
+        ActorType.Teeth => new Color("c05070"),
+        ActorType.Walker => new Color("c0a878"),
+        ActorType.Blob => new Color("88d048"),
+        _ => new Color("e090d0"), // paramecium
+    };
+
+    private static string MonsterGlyph(ActorType type) => type switch
+    {
+        ActorType.Bug => "b",
+        ActorType.Fireball => "f",
+        ActorType.Ball => "o",
+        ActorType.Tank => "t",
+        ActorType.Glider => "g",
+        ActorType.Teeth => "T",
+        ActorType.Walker => "w",
+        ActorType.Blob => "B",
+        _ => "p",
+    };
 
     private static Color Background(Tile tile) => tile switch
     {

@@ -8,8 +8,9 @@ namespace ChipsChallenge;
 
 public partial class Main : Node2D
 {
-    private const double RepeatDelay = 0.16;   // seconds between steps while held
-    private const double SlideDelay = 0.08;    // sliding is 2x walking speed (MS)
+    private const double RepeatDelay = 0.2;    // MS: Chip walks 5 tiles/second
+    private const double SlideDelay = 0.1;     // sliding is 2x walking speed (MS)
+    private const double MonsterDelay = 0.2;   // monsters move 5 tiles/second
     private const float SwipeThreshold = 48f;  // px of drag that counts as a swipe
     private const float TapSlop = 24f;         // max px of finger travel for a tap
 
@@ -21,6 +22,7 @@ public partial class Main : Node2D
     private double _timeLeft;        // seconds; <= 0 while untimed
     private int _shownSeconds = -1;
     private double _slideCooldown;
+    private double _monsterCooldown;
 
     private Board _board = null!;
     private Camera2D _camera = null!;
@@ -198,6 +200,7 @@ public partial class Main : Node2D
         _timeLeft = level.TimeLimit;
         _shownSeconds = -1;
         _slideCooldown = 0;
+        _monsterCooldown = MonsterDelay; // beat of grace before monsters move
         _autoPath = null;
         _touches.Clear();
         _pinching = false;
@@ -271,6 +274,15 @@ public partial class Main : Node2D
 
         var state = _board.State;
 
+        // Monsters move on their own clock, input or not.
+        _monsterCooldown -= delta;
+        if (_monsterCooldown <= 0)
+        {
+            _monsterCooldown += MonsterDelay;
+            HandleResult(_board.MonsterTick());
+            if (_awaitingRestart) return;
+        }
+
         var held = KeyboardDirection();
         if (held == Direction.None) held = _touchDir;
 
@@ -335,12 +347,19 @@ public partial class Main : Node2D
 
         if (_autoPath is { Count: > 0 })
         {
-            _cooldown -= delta;
-            if (_cooldown <= 0)
+            if (state != null && state.MonsterNear(2))
             {
-                _cooldown += RepeatDelay;
-                if (DoMove(_autoPath.Dequeue()) == MoveResult.Blocked)
-                    _autoPath = null; // world disagreed with the plan; stop
+                _autoPath = null; // danger close: stop autowalking, ask the human
+            }
+            else
+            {
+                _cooldown -= delta;
+                if (_cooldown <= 0)
+                {
+                    _cooldown += RepeatDelay;
+                    if (DoMove(_autoPath.Dequeue()) == MoveResult.Blocked)
+                        _autoPath = null; // world disagreed with the plan; stop
+                }
             }
         }
         else
