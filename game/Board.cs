@@ -30,9 +30,22 @@ public partial class Board : Node2D
     private readonly Dictionary<Actor, Vector2> _monsterVisual = new();
     private readonly Dictionary<int, Vector2> _blockVisual = new();
 
+    // Pickup feedback: an expanding ring + rising glyph at the collected
+    // item's tile. Loud enough to register even when the item was hidden
+    // under a block and never visible on the board.
+    private const double PickupFxSeconds = 0.8;
+    private sealed class PickupFx { public Vector2 Pos; public Tile Item; public double Age; }
+    private readonly List<PickupFx> _pickupFx = new();
+
     public void LoadLevel(LevelData level)
     {
         State = new GameState(level);
+        State.ItemCollected += (item, x, y) => _pickupFx.Add(new PickupFx
+        {
+            Pos = new Vector2(x * TileSize + TileSize / 2f, y * TileSize + TileSize / 2f),
+            Item = item,
+        });
+        _pickupFx.Clear();
         _monsterVisual.Clear();
         _blockVisual.Clear();
         _chipVisual = ChipPixelCenter;
@@ -62,6 +75,9 @@ public partial class Board : Node2D
         }
         foreach (var gone in _blockVisual.Keys.Where(k => !seen.Contains(k)).ToList())
             _blockVisual.Remove(gone);
+
+        foreach (var fx in _pickupFx) fx.Age += delta;
+        _pickupFx.RemoveAll(fx => fx.Age >= PickupFxSeconds);
 
         QueueRedraw();
     }
@@ -144,6 +160,16 @@ public partial class Board : Node2D
         // Chip
         DrawCircle(_chipVisual, 12, new Color("ffd75e"));
         DrawArc(_chipVisual, 12, 0, Mathf.Tau, 24, new Color("1a1a2e"), 2, antialiased: true);
+
+        foreach (var fx in _pickupFx)
+        {
+            var t = (float)(fx.Age / PickupFxSeconds);
+            var color = GlyphColor(fx.Item);
+            color.A = 1f - t * t; // linger bright, then drop off
+            DrawArc(fx.Pos, 10f + 26f * t, 0, Mathf.Tau, 32, color, 3f, antialiased: true);
+            DrawString(_font, fx.Pos + new Vector2(-TileSize / 2f, 8f - 22f * t),
+                Glyph(fx.Item), HorizontalAlignment.Center, TileSize, 20, color);
+        }
     }
 
     /// <summary>Thin walls and ice-corner walls drawn as bright edge lines.</summary>

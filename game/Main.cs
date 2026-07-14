@@ -526,6 +526,8 @@ public partial class Main : Node2D
     {
         _touchDir = Direction.None;
         _touchAnchor = null;
+        _touchRun = false;
         _autoPath = null;
+        _touchIndicator.End(); // don't leave the rings up over a death banner
     }
 }

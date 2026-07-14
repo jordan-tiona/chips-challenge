@@ -71,6 +71,10 @@ public sealed class GameState
 
     public IReadOnlyList<Actor> Monsters => _monsters;
 
+    /// <summary>Chip collected a chip, key, or boots at (x, y). Feedback
+    /// hook for the shell; replays and tests run with no subscribers.</summary>
+    public event Action<Tile, int, int>? ItemCollected;
+
     /// <summary>Reset the PRNG to a recorded seed (solution replay).</summary>
     public void SeedRng(uint seed) => _rng = new TwPrng(seed);
 
@@ -273,28 +277,34 @@ public sealed class GameState
             case Tile.Chip:
                 if (ChipsRemaining > 0) ChipsRemaining--;
                 SetTile(toX, toY, Tile.Floor);
+                ItemCollected?.Invoke(Tile.Chip, toX, toY);
                 break;
 
             case Tile.KeyRed or Tile.KeyBlue or Tile.KeyYellow or Tile.KeyGreen:
                 _keys[target]++;
                 SetTile(toX, toY, Tile.Floor);
+                ItemCollected?.Invoke(target, toX, toY);
                 break;
 
             case Tile.BootsWater:
                 HasFlippers = true;
                 SetTile(toX, toY, Tile.Floor);
+                ItemCollected?.Invoke(target, toX, toY);
                 break;
             case Tile.BootsFire:
                 HasFireBoots = true;
                 SetTile(toX, toY, Tile.Floor);
+                ItemCollected?.Invoke(target, toX, toY);
                 break;
             case Tile.BootsIce:
                 HasSkates = true;
                 SetTile(toX, toY, Tile.Floor);
+                ItemCollected?.Invoke(target, toX, toY);
                 break;
             case Tile.BootsForce:
                 HasSuction = true;
                 SetTile(toX, toY, Tile.Floor);
+                ItemCollected?.Invoke(target, toX, toY);
                 break;
 
             case Tile.Dirt:
