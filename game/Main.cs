@@ -32,8 +32,12 @@ public partial class Main : Node2D
     private Board _board = null!;
     private Camera2D _camera = null!;
     private Label _titleLabel = null!;
-    private Label _chipsLabel = null!;
-    private Label _invLabel = null!;
+    private Label _chipsValue = null!;
+    private PanelContainer _timePill = null!;
+    private Label _timeValue = null!;
+    private readonly List<(PanelContainer Pill, Label Label, Tile Key, string Letter)> _keyPills = new();
+    private readonly List<(PanelContainer Pill, System.Func<GameState, bool> Has)> _bootPills = new();
+    private PanelContainer _topBar = null!;
     private Label _hintLabel = null!;
     private PanelContainer _hintPanel = null!;
     private PanelContainer _banner = null!;
@@ -52,6 +56,7 @@ public partial class Main : Node2D
     private bool _pinching;   // two-finger camera gesture in progress
     private bool _freeCam;    // camera detached from Chip until next move
     private float _zoom = 2f;
+    private Progress _progress = new();
 
     public override void _Ready()
     {
@@ -76,7 +81,8 @@ public partial class Main : Node2D
         _camera.MakeCurrent();
 
         BuildHud();
-        LoadLevel(0);
+        _progress = Progress.Load();
+        LoadLevel(Mathf.Clamp(_progress.LastLevelIndex, 0, _levels.Count - 1));
     }
 
     private MarginContainer _safeArea = null!;
@@ -106,31 +112,65 @@ public partial class Main : Node2D
         _touchIndicator.SetAnchorsPreset(Control.LayoutPreset.FullRect);
         hud.AddChild(_touchIndicator); // outside the safe area: rings follow the finger
 
-        // ---- top bar: prev | title + chips | next ----
-        var topBar = new PanelContainer();
-        topBar.SetAnchorsPreset(Control.LayoutPreset.TopWide);
-        root.AddChild(topBar);
+        // ---- top bar: prev | title + stat pills | next ----
+        _topBar = new PanelContainer();
+        _topBar.SetAnchorsPreset(Control.LayoutPreset.TopWide);
+        root.AddChild(_topBar);
+        // The board is framed below the bar (UpdateCameraFraming), so track
+        // every bar move/resize: layout, rotation, safe-area changes.
+        _topBar.ItemRectChanged += UpdateCameraFraming;
 
         var row = new HBoxContainer();
         row.AddThemeConstantOverride("separation", 12);
-        topBar.AddChild(row);
+        _topBar.AddChild(row);
 
         var prev = MakeNavButton("<");
         prev.Pressed += () => LoadLevel(_levelIndex - 1);
         row.AddChild(prev);
 
         var mid = new VBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
+        mid.AddThemeConstantOverride("separation", 6);
         _titleLabel = new Label { HorizontalAlignment = HorizontalAlignment.Center };
         _titleLabel.AddThemeFontSizeOverride("font_size", 26);
-        _chipsLabel = new Label { HorizontalAlignment = HorizontalAlignment.Center };
-        _chipsLabel.AddThemeFontSizeOverride("font_size", 20);
-        _invLabel = new Label { HorizontalAlignment = HorizontalAlignment.Center };
-        _invLabel.AddThemeFontSizeOverride("font_size", 16);
-        _invLabel.AddThemeColorOverride("font_color", new Color(0.8f, 0.8f, 0.85f));
         mid.AddChild(_titleLabel);
-        mid.AddChild(_chipsLabel);
-        mid.AddChild(_invLabel);
+
+        var stats = new HBoxContainer { Alignment = BoxContainer.AlignmentMode.Center };
+        stats.AddThemeConstantOverride("separation", 8);
+        mid.AddChild(stats);
         row.AddChild(mid);
+
+        (var chipsPill, _chipsValue) = MakePill(new Color("ffd75e"));
+        stats.AddChild(chipsPill);
+        (_timePill, _timeValue) = MakePill(new Color("a9d5e2"));
+        stats.AddChild(_timePill);
+
+        foreach (var (key, color, letter) in new[]
+        {
+            (Tile.KeyRed, new Color("e05050"), "R"),
+            (Tile.KeyBlue, new Color("5080e0"), "B"),
+            (Tile.KeyYellow, new Color("e0d050"), "Y"),
+            (Tile.KeyGreen, new Color("50e080"), "G"),
+        })
+        {
+            var (pill, label) = MakePill(color);
+            label.Text = letter;
+            stats.AddChild(pill);
+            _keyPills.Add((pill, label, key, letter));
+        }
+
+        foreach (var (name, color, has) in new (string, Color, System.Func<GameState, bool>)[]
+        {
+            ("flip", new Color("60a0ff"), s => s.HasFlippers),
+            ("fire", new Color("ff8050"), s => s.HasFireBoots),
+            ("skate", new Color("b0e0f0"), s => s.HasSkates),
+            ("grip", new Color("b090e0"), s => s.HasSuction),
+        })
+        {
+            var (pill, label) = MakePill(color);
+            label.Text = name;
+            stats.AddChild(pill);
+            _bootPills.Add((pill, has));
+        }
 
         var next = MakeNavButton(">");
         next.Pressed += () => LoadLevel(_levelIndex + 1);
@@ -163,30 +203,59 @@ public partial class Main : Node2D
         center.MouseFilter = Control.MouseFilterEnum.Ignore;
         root.AddChild(center);
         _banner = new PanelContainer { Visible = false };
-        _bannerLabel = new Label();
+        _bannerLabel = new Label { HorizontalAlignment = HorizontalAlignment.Center };
         _bannerLabel.AddThemeFontSizeOverride("font_size", 40);
         _banner.AddChild(_bannerLabel);
         center.AddChild(_banner);
     }
 
-    /// <summary>Convert the OS-reported safe area (physical px) into canvas
-    /// units and apply it as HUD margins. Rerun on window resize/rotation.</summary>
+    /// <summary>Convert the OS-reported safe area into window-relative
+    /// insets (GetDisplaySafeArea is in global desktop coordinates — on a
+    /// multi-monitor desktop it can start at e.g. x=1920) and apply them as
+    /// HUD margins in canvas units. Rerun on window resize/rotation.</summary>
     private void ApplySafeAreaMargins()
     {
         var win = DisplayServer.WindowGetSize();
+        var pos = DisplayServer.WindowGetPosition();
         var safe = DisplayServer.GetDisplaySafeArea();
         var canvas = GetViewport().GetVisibleRect().Size;
         if (win.X <= 0 || win.Y <= 0 || canvas.X <= 0) return;
         var scale = win.X / canvas.X;
 
-        _safeArea.AddThemeConstantOverride("margin_left",
-            Mathf.RoundToInt(safe.Position.X / scale));
-        _safeArea.AddThemeConstantOverride("margin_top",
-            Mathf.RoundToInt(safe.Position.Y / scale));
-        _safeArea.AddThemeConstantOverride("margin_right",
-            Mathf.RoundToInt((win.X - safe.Position.X - safe.Size.X) / scale));
-        _safeArea.AddThemeConstantOverride("margin_bottom",
-            Mathf.RoundToInt((win.Y - safe.Position.Y - safe.Size.Y) / scale));
+        var left = Mathf.Max(0, safe.Position.X - pos.X);
+        var top = Mathf.Max(0, safe.Position.Y - pos.Y);
+        var right = Mathf.Max(0, pos.X + win.X - safe.End.X);
+        var bottom = Mathf.Max(0, pos.Y + win.Y - safe.End.Y);
+
+        _safeArea.AddThemeConstantOverride("margin_left", Mathf.RoundToInt(left / scale));
+        _safeArea.AddThemeConstantOverride("margin_top", Mathf.RoundToInt(top / scale));
+        _safeArea.AddThemeConstantOverride("margin_right", Mathf.RoundToInt(right / scale));
+        _safeArea.AddThemeConstantOverride("margin_bottom", Mathf.RoundToInt(bottom / scale));
+    }
+
+    /// <summary>Rounded stat pill: accent border + tinted fill + accent text.
+    /// Readable at a glance in the palette the board already uses.</summary>
+    private static (PanelContainer Pill, Label Label) MakePill(Color accent)
+    {
+        var style = new StyleBoxFlat
+        {
+            BgColor = new Color(accent.R, accent.G, accent.B, 0.14f),
+            BorderColor = accent,
+            ContentMarginLeft = 12,
+            ContentMarginRight = 12,
+            ContentMarginTop = 2,
+            ContentMarginBottom = 2,
+        };
+        style.SetBorderWidthAll(2);
+        style.SetCornerRadiusAll(10);
+
+        var pill = new PanelContainer();
+        pill.AddThemeStyleboxOverride("panel", style);
+        var label = new Label { HorizontalAlignment = HorizontalAlignment.Center };
+        label.AddThemeFontSizeOverride("font_size", 19);
+        label.AddThemeColorOverride("font_color", accent);
+        pill.AddChild(label);
+        return (pill, label);
     }
 
     private static Button MakeNavButton(string text)
@@ -223,6 +292,11 @@ public partial class Main : Node2D
         _camera.Position = _board.ChipPixelCenter;
         _camera.ResetSmoothing();
         RefreshHud();
+        if (_progress.LastLevelIndex != _levelIndex)
+        {
+            _progress.LastLevelIndex = _levelIndex;
+            _progress.Save();
+        }
         GD.Print($"Level {level.Number}: {level.Title} (password {level.Password})");
     }
 
@@ -231,28 +305,51 @@ public partial class Main : Node2D
         var state = _board.State;
         if (state == null) return;
 
-        var time = _currentLevel is { TimeLimit: > 0 }
-            ? $"   time: {Mathf.Max(0, Mathf.CeilToInt(_timeLeft))}"
-            : "";
-        _chipsLabel.Text = $"chips left: {state.ChipsRemaining}{time}";
+        _chipsValue.Text = $"chips {state.ChipsRemaining}";
+        _chipsValue.AddThemeColorOverride("font_color",
+            state.ChipsRemaining == 0 ? new Color("50e080") : new Color("ffd75e"));
 
-        var keys = "";
-        if (state.GetKeyCount(Tile.KeyRed) > 0) keys += $" R{state.GetKeyCount(Tile.KeyRed)}";
-        if (state.GetKeyCount(Tile.KeyBlue) > 0) keys += $" B{state.GetKeyCount(Tile.KeyBlue)}";
-        if (state.GetKeyCount(Tile.KeyYellow) > 0) keys += $" Y{state.GetKeyCount(Tile.KeyYellow)}";
-        if (state.GetKeyCount(Tile.KeyGreen) > 0) keys += " G";
-        var boots = "";
-        if (state.HasFlippers) boots += " flippers";
-        if (state.HasFireBoots) boots += " fire";
-        if (state.HasSkates) boots += " skates";
-        if (state.HasSuction) boots += " suction";
-        _invLabel.Text = (keys.Length > 0 ? $"keys:{keys}" : "")
-            + (keys.Length > 0 && boots.Length > 0 ? "   " : "")
-            + (boots.Length > 0 ? $"boots:{boots}" : "");
-        _invLabel.Visible = _invLabel.Text.Length > 0;
+        if (_currentLevel is { TimeLimit: > 0 })
+        {
+            _timePill.Visible = true;
+            var seconds = Mathf.Max(0, Mathf.CeilToInt(_timeLeft));
+            _timeValue.Text = $"time {seconds}";
+            _timeValue.AddThemeColorOverride("font_color",
+                seconds <= 15 ? new Color("ff6050") : new Color("a9d5e2"));
+        }
+        else
+        {
+            _timePill.Visible = false;
+        }
+
+        foreach (var (pill, label, key, letter) in _keyPills)
+        {
+            var count = state.GetKeyCount(key);
+            pill.Visible = count > 0;
+            if (count > 0)
+                label.Text = key == Tile.KeyGreen || count == 1 ? letter : $"{letter}{count}";
+        }
+        foreach (var (pill, has) in _bootPills)
+            pill.Visible = has(state);
 
         _hintPanel.Visible = state.OnHint && state.Hint.Length > 0;
         _hintLabel.Text = state.Hint;
+    }
+
+    /// <summary>Frame the world in the band below the top bar instead of the
+    /// full window, so the bar never covers Chip. Camera2D clamps to limits
+    /// *before* applying Offset, so shifting the view up by half the bar's
+    /// world-space height and widening both vertical limits by the same
+    /// amount yields exactly: world top edge at the bar's bottom, world
+    /// bottom edge at the screen's bottom.</summary>
+    private void UpdateCameraFraming()
+    {
+        if (_topBar == null || _camera == null) return;
+        var occluded = _topBar.GetGlobalRect().End.Y; // canvas px hidden behind the bar
+        var half = occluded / _zoom / 2f;             // world px, halved
+        _camera.Offset = new Vector2(0, -half);
+        _camera.LimitTop = Mathf.RoundToInt(-half);
+        _camera.LimitBottom = Mathf.RoundToInt(GameState.Height * Board.TileSize + half);
     }
 
     public override void _Process(double delta)
@@ -470,6 +567,7 @@ public partial class Main : Node2D
     {
         _zoom = Mathf.Clamp(zoom, MinZoom, MaxZoom);
         _camera.Zoom = new Vector2(_zoom, _zoom);
+        UpdateCameraFraming(); // bar occlusion in world units depends on zoom
     }
 
     /// <summary>Any actual move re-attaches the camera to Chip.</summary>
@@ -504,14 +602,42 @@ public partial class Main : Node2D
             case MoveResult.Won:
                 _inputLocked = true;
                 ClearInputState();
-                _bannerLabel.Text = "  Level Complete!  ";
+                _bannerLabel.Text = WinBanner();
                 _banner.Visible = true;
-                GetTree().CreateTimer(1.5).Timeout += () => LoadLevel(_levelIndex + 1);
+                GetTree().CreateTimer(2.0).Timeout += () => LoadLevel(_levelIndex + 1);
                 break;
             case MoveResult.Died:
                 ShowDeath(_board.State?.DeathReason ?? "");
                 break;
         }
+    }
+
+    /// <summary>Record the win in progress (furthest level, best time-left
+    /// for timed levels) and build the banner text.</summary>
+    private string WinBanner()
+    {
+        _progress.FurthestLevelIndex = Mathf.Max(_progress.FurthestLevelIndex,
+            Mathf.Min(_levelIndex + 1, _levels.Count - 1));
+
+        var text = "  Level Complete!  ";
+        if (_currentLevel is { TimeLimit: > 0 } level)
+        {
+            var left = Mathf.Max(0, Mathf.CeilToInt(_timeLeft));
+            var best = _progress.BestTimeLeft.GetValueOrDefault(level.Number, -1);
+            if (left > best)
+            {
+                _progress.BestTimeLeft[level.Number] = left;
+                text += best < 0
+                    ? $"\n  time left: {left}  "
+                    : $"\n  time left: {left} — new best!  ";
+            }
+            else
+            {
+                text += $"\n  time left: {left} (best {best})  ";
+            }
+        }
+        _progress.Save();
+        return text;
     }
 
     private void ShowDeath(string reason)
