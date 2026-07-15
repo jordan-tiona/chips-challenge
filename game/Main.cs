@@ -31,7 +31,8 @@ public partial class Main : Node2D
 
     private Board _board = null!;
     private Camera2D _camera = null!;
-    private Label _titleLabel = null!;
+    private Button _titleButton = null!;
+    private LevelSelect _levelSelect = null!;
     private Label _chipsValue = null!;
     private PanelContainer _timePill = null!;
     private Label _timeValue = null!;
@@ -80,8 +81,8 @@ public partial class Main : Node2D
         _board.AddChild(_camera);
         _camera.MakeCurrent();
 
-        BuildHud();
         _progress = Progress.Load();
+        BuildHud();
         LoadLevel(Mathf.Clamp(_progress.LastLevelIndex, 0, _levels.Count - 1));
     }
 
@@ -130,9 +131,29 @@ public partial class Main : Node2D
 
         var mid = new VBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
         mid.AddThemeConstantOverride("separation", 6);
-        _titleLabel = new Label { HorizontalAlignment = HorizontalAlignment.Center };
-        _titleLabel.AddThemeFontSizeOverride("font_size", 26);
-        mid.AddChild(_titleLabel);
+        // The title doubles as the level-select opener; a subtle pill outline
+        // marks it as tappable.
+        _titleButton = new Button
+        {
+            SizeFlagsHorizontal = Control.SizeFlags.ShrinkCenter,
+            FocusMode = Control.FocusModeEnum.None,
+        };
+        var titleStyle = new StyleBoxFlat
+        {
+            BgColor = new Color(1, 1, 1, 0.05f),
+            BorderColor = new Color("565664"),
+            ContentMarginLeft = 16,
+            ContentMarginRight = 16,
+            ContentMarginTop = 2,
+            ContentMarginBottom = 2,
+        };
+        titleStyle.SetBorderWidthAll(2);
+        titleStyle.SetCornerRadiusAll(10);
+        foreach (var mode in new[] { "normal", "hover", "pressed" })
+            _titleButton.AddThemeStyleboxOverride(mode, titleStyle);
+        _titleButton.AddThemeFontSizeOverride("font_size", 26);
+        _titleButton.Pressed += OpenLevelSelect;
+        mid.AddChild(_titleButton);
 
         var stats = new HBoxContainer { Alignment = BoxContainer.AlignmentMode.Center };
         stats.AddThemeConstantOverride("separation", 8);
@@ -207,6 +228,18 @@ public partial class Main : Node2D
         _bannerLabel.AddThemeFontSizeOverride("font_size", 40);
         _banner.AddChild(_bannerLabel);
         center.AddChild(_banner);
+
+        // ---- level select overlay (added last: draws over everything) ----
+        _levelSelect = new LevelSelect();
+        _levelSelect.Setup(_levels, _progress);
+        _levelSelect.LevelChosen += LoadLevel;
+        root.AddChild(_levelSelect);
+    }
+
+    private void OpenLevelSelect()
+    {
+        ClearInputState(); // drop any in-flight gesture before pausing input
+        _levelSelect.Open(_levelIndex);
     }
 
     /// <summary>Convert the OS-reported safe area into window-relative
@@ -276,7 +309,7 @@ public partial class Main : Node2D
         var level = _levels[_levelIndex];
         _currentLevel = level;
         _board.LoadLevel(level);
-        _titleLabel.Text = $"{level.Number}. {level.Title}";
+        _titleButton.Text = $"{level.Number}. {level.Title}";
         _banner.Visible = false;
         _inputLocked = false;
         _awaitingRestart = false;
@@ -354,6 +387,9 @@ public partial class Main : Node2D
 
     public override void _Process(double delta)
     {
+        // Level select is modal: the world (timer included) waits under it.
+        if (_levelSelect.Visible) return;
+
         // A frame hitch must pause the world, not fast-forward it: without
         // this, banked ticks burst (multi-tile jumps) and a long frame can
         // inflate the hold clock past the run grace mid-swipe.
@@ -475,6 +511,10 @@ public partial class Main : Node2D
 
     public override void _UnhandledInput(InputEvent @event)
     {
+        // GUI consumes the emulated mouse over the level select, but raw
+        // ScreenTouch events still reach here — ignore them while it's up.
+        if (_levelSelect.Visible) return;
+
         if (_awaitingRestart)
         {
             if (@event is InputEventScreenTouch { Pressed: false })
@@ -618,6 +658,7 @@ public partial class Main : Node2D
     {
         _progress.FurthestLevelIndex = Mathf.Max(_progress.FurthestLevelIndex,
             Mathf.Min(_levelIndex + 1, _levels.Count - 1));
+        if (_currentLevel != null) _progress.Done.Add(_currentLevel.Number);
 
         var text = "  Level Complete!  ";
         if (_currentLevel is { TimeLimit: > 0 } level)

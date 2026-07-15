@@ -18,6 +18,7 @@ public sealed class Progress
     public int LastLevelIndex;
     public int FurthestLevelIndex;
     public readonly Dictionary<int, int> BestTimeLeft = new(); // level number -> seconds left
+    public readonly HashSet<int> Done = new();                 // level numbers ever completed
 
     public static Progress Load()
     {
@@ -38,6 +39,14 @@ public sealed class Progress
                     progress.BestTimeLeft[number] = kv.Value.AsInt32();
             }
         }
+        if (dict.TryGetValue("done", out var done) && done.VariantType == Variant.Type.Array)
+        {
+            foreach (var v in done.AsGodotArray())
+                progress.Done.Add(v.AsInt32());
+        }
+        // Saves from before "done" existed: a recorded best implies a win.
+        foreach (var number in progress.BestTimeLeft.Keys)
+            progress.Done.Add(number);
         return progress;
     }
 
@@ -45,11 +54,14 @@ public sealed class Progress
     {
         var best = new Godot.Collections.Dictionary();
         foreach (var (number, seconds) in BestTimeLeft) best[number.ToString()] = seconds;
+        var done = new Godot.Collections.Array();
+        foreach (var number in Done) done.Add(number);
         var dict = new Godot.Collections.Dictionary
         {
             ["last"] = LastLevelIndex,
             ["furthest"] = FurthestLevelIndex,
             ["best"] = best,
+            ["done"] = done,
         };
         using var file = FileAccess.Open(SavePath, FileAccess.ModeFlags.Write);
         file?.StoreString(Json.Stringify(dict, "  "));
